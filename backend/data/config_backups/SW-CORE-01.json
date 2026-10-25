@@ -1,0 +1,42 @@
+[
+  {
+    "ts": "2026-10-25T03:45:52.136696+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T03:45:49.777878+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T03:26:47.669903+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T03:26:45.326258+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T03:20:49.472310+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T03:20:47.141368+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T02:55:26.692383+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T02:55:24.352871+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T02:36:06.128945+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-10-25T02:36:06.005818+00:00",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  }
+]
