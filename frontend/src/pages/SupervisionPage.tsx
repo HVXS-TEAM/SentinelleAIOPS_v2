@@ -1,20 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  AlertTriangle,
-  Wrench,
-  Clock,
-  ChevronDown,
-  Sliders,
-  CheckCircle2,
-  X,
-  Calendar,
-  User,
-  Activity,
-  HardDrive,
-  Cpu,
-  RefreshCw,
-  Server,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -276,7 +261,7 @@ export const SupervisionPage: React.FC = () => {
       {/* ── Toast de confirmation ─────────────────────────────────────────── */}
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1d2022] border border-[#78d8ba] text-[#78d8ba] px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+          <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
           {toastMsg}
         </div>
       )}
@@ -308,7 +293,7 @@ export const SupervisionPage: React.FC = () => {
           disabled={isLoadingLive}
           className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[#78d8ba]/40 bg-[#78d8ba]/10 hover:bg-[#78d8ba]/20 text-[#78d8ba] font-mono text-xs transition-colors cursor-pointer self-start sm:self-auto"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLive ? 'animate-spin' : ''}`} />
+          <Icon name="refresh" size="xs" className={isLoadingLive ? 'animate-spin' : ''} />
           <span>Rafraîchir Sonde</span>
         </button>
       </div>
@@ -331,7 +316,7 @@ export const SupervisionPage: React.FC = () => {
               onClick={() => handleDeviceSelect(hardwareLive.hostname)}
               className="text-[11px] font-mono text-[#78d8ba] hover:underline flex items-center gap-1 cursor-pointer"
             >
-              <Server className="w-3 h-3" />
+              <Icon name="dns" size="xs" />
               <span>Superviser cet hôte dans les graphiques</span>
             </button>
           </div>
@@ -340,7 +325,7 @@ export const SupervisionPage: React.FC = () => {
             {/* CPU */}
             <div className="bg-[#101416] p-3 rounded-lg border border-[#272a2d]">
               <div className="text-[11px] text-[#87938e] flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1"><Cpu className="w-3 h-3 text-[#78d8ba]" /> CPU Réel</span>
+                <span className="flex items-center gap-1"><Icon name="memory" size="xs" className="text-[#78d8ba]" /> CPU Réel</span>
                 <span className="text-[#e0e3e6]">{hardwareLive.cpu_count} cœurs</span>
               </div>
               <div className="text-xl font-bold text-[#78d8ba]">{hardwareLive.cpu_percent}%</div>
@@ -355,7 +340,7 @@ export const SupervisionPage: React.FC = () => {
             {/* RAM */}
             <div className="bg-[#101416] p-3 rounded-lg border border-[#272a2d]">
               <div className="text-[11px] text-[#87938e] flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-orange-400" /> RAM Réelle</span>
+                <span className="flex items-center gap-1"><Icon name="monitoring" size="xs" className="text-orange-400" /> RAM Réelle</span>
                 <span className="text-[#e0e3e6]">{hardwareLive.ram_used_gb} / {hardwareLive.ram_total_gb} Go</span>
               </div>
               <div className="text-xl font-bold text-orange-400">{hardwareLive.ram_percent}%</div>
@@ -370,7 +355,7 @@ export const SupervisionPage: React.FC = () => {
             {/* Disque */}
             <div className="bg-[#101416] p-3 rounded-lg border border-[#272a2d]">
               <div className="text-[11px] text-[#87938e] flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1"><HardDrive className="w-3 h-3 text-[#ffb4ab]" /> Disque ({hardwareLive.disk_mount})</span>
+                <span className="flex items-center gap-1"><Icon name="storage" size="xs" className="text-[#ffb4ab]" /> Disque ({hardwareLive.disk_mount})</span>
                 <span className="text-[#e0e3e6]">{hardwareLive.disk_used_gb} / {hardwareLive.disk_total_gb} Go</span>
               </div>
               <div className="text-xl font-bold text-[#ffb4ab]">{hardwareLive.disk_percent}%</div>
@@ -385,7 +370,7 @@ export const SupervisionPage: React.FC = () => {
             {/* Réseau & Santé */}
             <div className="bg-[#101416] p-3 rounded-lg border border-[#272a2d]">
               <div className="text-[11px] text-[#87938e] flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-[#81d0f8]" /> Score Santé Hôte</span>
+                <span className="flex items-center gap-1"><Icon name="monitoring" size="xs" className="text-[#81d0f8]" /> Score Santé Hôte</span>
                 <span className="text-[#81d0f8] font-bold">{hardwareLive.score_sante}%</span>
               </div>
               <div className="text-sm font-bold text-[#e0e3e6] truncate">
@@ -405,7 +390,7 @@ export const SupervisionPage: React.FC = () => {
         <div className="lg:col-span-5 bg-[#1d2022] border border-[#ffb4ab]/50 rounded-xl p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-[#ffb4ab] text-[11px] font-mono font-bold uppercase tracking-widest mb-3">
-              <AlertTriangle className="w-4 h-4 text-[#ffb4ab]" />
+              <Icon name="warning" size="sm" className="text-[#ffb4ab]" />
               PRÉDICTION CRITIQUE IMMINENTE
             </div>
             <h2 className="text-xl font-bold text-[#e0e3e6] leading-tight mb-2">
@@ -433,7 +418,7 @@ export const SupervisionPage: React.FC = () => {
             onClick={() => setShowInterventionDrawer(true)}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[#ffb4ab] hover:bg-[#ffdad6] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm"
           >
-            <Wrench className="w-4 h-4" />
+            <Icon name="build" size="sm" />
             Planifier Intervention
           </button>
 
@@ -443,7 +428,7 @@ export const SupervisionPage: React.FC = () => {
             disabled={isSimulating}
             className="w-full mt-2.5 flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#78d8ba] bg-[#78d8ba]/10 hover:bg-[#78d8ba]/20 text-[#78d8ba] font-mono font-bold text-xs transition-colors cursor-pointer"
           >
-            <Activity className="w-3.5 h-3.5 text-[#78d8ba]" />
+            <Icon name="monitoring" size="xs" className="text-[#78d8ba]" />
             <span>{isSimulating ? 'Calcul du modèle...' : 'Simuler Saturation & Recalculer TTF'}</span>
           </button>
         </div>
@@ -452,7 +437,7 @@ export const SupervisionPage: React.FC = () => {
         <div className="lg:col-span-3 bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-5">
-              <Sliders className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="tune" size="sm" className="text-[#78d8ba]" />
               Configuration Alertes
             </div>
 
@@ -536,7 +521,7 @@ export const SupervisionPage: React.FC = () => {
                   </div>
                   <p className="text-[11px] text-[#87938e] truncate">{u.description}</p>
                   <div className="flex items-center gap-1.5 mt-1 text-[11px] font-mono text-[#bdc9c3]">
-                    <Clock className="w-3 h-3 text-[#87938e]" />
+                    <Icon name="schedule" size="xs" className="text-[#87938e]" />
                     <span>{u.ttf}</span>
                   </div>
                 </div>
@@ -573,7 +558,7 @@ export const SupervisionPage: React.FC = () => {
               className="flex items-center gap-3 px-4 py-2 rounded-lg bg-[#161c22] border border-[#3e4945] text-xs font-mono text-[#e0e3e6] hover:border-[#78d8ba] transition-colors"
             >
               <span>{selectedDevice}</span>
-              <ChevronDown className="w-3.5 h-3.5 text-[#87938e]" />
+              <Icon name="expand_more" size="xs" className="text-[#87938e]" />
             </button>
             {dropdownOpen && (
               <div className="absolute right-0 top-full mt-1.5 w-56 bg-[#161c22] border border-[#3e4945] rounded-lg shadow-2xl z-20 overflow-hidden font-mono text-xs max-h-64 overflow-y-auto">
@@ -618,7 +603,7 @@ export const SupervisionPage: React.FC = () => {
           <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-4">
             <div className="flex items-center justify-between mb-3 text-xs font-mono">
               <span className="font-semibold text-[#e0e3e6] flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5 text-[#78d8ba]" />
+                <Icon name="memory" size="xs" className="text-[#78d8ba]" />
                 CPU Utilization
               </span>
               <span className="font-bold text-[#78d8ba]">
@@ -648,7 +633,7 @@ export const SupervisionPage: React.FC = () => {
           <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-4">
             <div className="flex items-center justify-between mb-3 text-xs font-mono">
               <span className="font-semibold text-[#e0e3e6] flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-orange-400" />
+                <Icon name="monitoring" size="xs" className="text-orange-400" />
                 RAM Usage
               </span>
               <span className="font-bold text-orange-400">
@@ -678,7 +663,7 @@ export const SupervisionPage: React.FC = () => {
           <div className="bg-[#161c22] border border-[#ffb4ab]/40 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3 text-xs font-mono">
               <span className="font-semibold text-[#ffb4ab] flex items-center gap-1.5">
-                <HardDrive className="w-3.5 h-3.5 text-[#ffb4ab]" />
+                <Icon name="storage" size="xs" className="text-[#ffb4ab]" />
                 Disk I/O &amp; Fill
               </span>
               <span className="font-bold text-[#ffb4ab]">
@@ -709,7 +694,7 @@ export const SupervisionPage: React.FC = () => {
           <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-4">
             <div className="flex items-center justify-between mb-3 text-xs font-mono">
               <span className="font-semibold text-[#e0e3e6] flex items-center gap-1.5">
-                <Activity className="w-3.5 h-3.5 text-[#81d0f8]" />
+                <Icon name="monitoring" size="xs" className="text-[#81d0f8]" />
                 Network Traffic
               </span>
               <span className="font-bold text-[#81d0f8]">
@@ -755,7 +740,7 @@ export const SupervisionPage: React.FC = () => {
                   onClick={() => setShowInterventionDrawer(false)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 
@@ -789,11 +774,11 @@ export const SupervisionPage: React.FC = () => {
                 <div className="p-3.5 bg-[#1d2022] rounded-xl border border-[#272a2d] space-y-2">
                   <div className="text-[10px] text-[#87938e] uppercase font-bold">Assignation</div>
                   <div className="flex items-center gap-2 text-[#e0e3e6]">
-                    <User className="w-4 h-4 text-[#78d8ba]" />
+                    <Icon name="person" size="sm" className="text-[#78d8ba]" />
                     <span>Technicien d'astreinte : J. Doe (Admin)</span>
                   </div>
                   <div className="flex items-center gap-2 text-[#87938e] mt-1">
-                    <Calendar className="w-4 h-4" />
+                    <Icon name="calendar_today" size="sm" />
                     <span>Planification : Immédiate (priorité haute)</span>
                   </div>
                 </div>

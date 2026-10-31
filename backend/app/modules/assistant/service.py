@@ -27,8 +27,42 @@ from backend.app.modules.netdevops.service import _audit_config, _SIMULATED_CONF
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
+_EMOJI_TO_TAG_MAP: tuple[tuple[str, str], ...] = (
+    ("🔴", "[CRITIQUE] "),
+    ("🚨", "[CRITIQUE] "),
+    ("🟠", "[MAJEUR] "),
+    ("🟡", "[MINEUR] "),
+    ("⚠️", "[ALERTE] "),
+    ("⚠", "[ALERTE] "),
+    ("🟢", "[CONFORME] "),
+    ("✅", "[CONFORME] "),
+    ("🔒", "[AUDIT CIS] "),
+    ("🛡️", ""),
+    ("🛡", ""),
+    ("🔍", ""),
+    ("📊", ""),
+    ("⏳", ""),
+    ("📋", ""),
+    ("🌐", ""),
+)
+
+_UNICODE_EMOJI_RE = re.compile(
+    r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2300-\u23FF\uFE0F]"
+)
+
 
 class AssistantService:
+    @staticmethod
+    def _sanitize_clinical_text(text: str) -> str:
+        """Remplace les émojis par des tags cliniques ITIL/CIS et purge tout pictogramme résiduel."""
+        cleaned = text
+        for emoji, tag in _EMOJI_TO_TAG_MAP:
+            cleaned = cleaned.replace(emoji, tag)
+        cleaned = _UNICODE_EMOJI_RE.sub("", cleaned)
+        cleaned = re.sub(r"(\[(?:CRITIQUE|MAJEUR|MINEUR|CONFORME|ALERTE|AUDIT CIS)\])\s+\1", r"\1", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        return cleaned.strip()
+
     @staticmethod
     def get_suggested_prompts() -> list[str]:
         """Retourne les suggestions de questions rapides pour l'administrateur réseau."""
@@ -108,34 +142,31 @@ class AssistantService:
             "Quel est le score CIS des équipements ?",
         ]
 
-        # 0. Analyse experte de Fichier / Config réseau / Extrait de code importé
-        if any(w in q_lower for w in ["[fichier", "```", "line vty", "service password", "enable secret", "transport input", "logging buffered"]):
-            sources.append("Parseur Sémantique NetDevOps")
-            sources.append("CIS Cisco IOS Benchmark")
-            
-            # Analyse des vulnérabilités dans le snippet
+        # Cas 0. Détection d'un extrait de configuration Cisco collé directement
+        if any(w in q_lower for w in ["line vty", "service password", "enable secret", "transport input", "username"]):
+            sources.append("Audit NetDevOps CIS")
             vulns = []
             if "service password-encryption" not in q_lower:
-                vulns.append("🔴 **CIS 1.1.1** : `service password-encryption` absent (mots de passe stockés en clair).")
+                vulns.append("[CRITIQUE - CIS 1.1.1] : 'service password-encryption' absent (mots de passe stockés en clair).")
             if "transport input ssh" not in q_lower and ("line vty" in q_lower or "telnet" in q_lower):
-                vulns.append("🔴 **CIS 1.2.2** : `transport input ssh` manquant sur les lignes VTY (risque d'interception Telnet).")
+                vulns.append("[CRITIQUE - CIS 1.2.2] : 'transport input ssh' manquant sur les lignes VTY (interception Telnet non chiffrée).")
             if "enable secret" not in q_lower:
-                vulns.append("🟠 **CIS 1.1.2** : `enable secret` non configuré ou utilisant un mot de passe réversible.")
+                vulns.append("[MAJEUR - CIS 1.1.2] : 'enable secret' non configuré ou utilisant un mot de passe réversible.")
             if "logging buffered" not in q_lower and "syslog" in q_lower:
-                vulns.append("🟡 **CIS 2.1.4** : Journalisation locale `logging buffered` non optimisée.")
+                vulns.append("[MINEUR - CIS 2.1.4] : Journalisation locale 'logging buffered' non optimisée.")
 
-            lines = ["### 🔍 Diagnostic Expert de Configuration & Analyse de Sécurité\n"]
+            lines = ["### Diagnostic de Configuration & Analyse de Conformité CIS\n"]
             lines.append("Le moteur Sentinelle IA a inspecté la configuration réseau fournie :\n")
             if vulns:
-                lines.append(f"⚠️ **{len(vulns)} anomalie(s) ou écart(s) de conformité détecté(s) :**")
+                lines.append(f"**{len(vulns)} anomalie(s) de conformité détectée(s) :**")
                 for v in vulns:
                     lines.append(f"- {v}")
             else:
-                lines.append("✅ La structure syntaxique globale est cohérente avec les standards de durcissement réseau.")
+                lines.append("[CONFORME] La structure syntaxique globale est conforme aux exigences de durcissement réseau.")
 
             lines.append("\n**Script de remédiation Cisco IOS recommandé (NetDevOps) :**")
             lines.append("```cisco\nconfigure terminal\nservice password-encryption\nenable secret SentinelleVault2026!\nline vty 0 4\n transport input ssh\n exec-timeout 10 0\n logging synchronous\nexit\nend\nwrite memory\n```")
-            lines.append("\n*Ce correctif peut être déployé automatiquement via le module NetDevOps avec Netmiko SSH.*")
+            lines.append("\n*Ce correctif peut être validé et déployé via le module NetDevOps avec Netmiko SSH.*")
 
             return {
                 "response": "\n".join(lines),
@@ -154,20 +185,20 @@ class AssistantService:
             degrades = [e for e in equipements if 50.0 <= e.score_sante < 80.0]
             sains = [e for e in equipements if e.score_sante >= 80.0]
 
-            lines = ["### 📊 État de santé actuel du parc informatique\n"]
+            lines = ["### État de Santé Opérationnel du Parc Informatique\n"]
             if critiques:
-                lines.append("**Équipements en état critique (< 50%) :**")
+                lines.append("**Équipements en seuil critique (< 50%) :**")
                 for e in critiques:
-                    lines.append(f"- 🔴 **{e.nom}** ({e.ip}) : score de {e.score_sante}% · Statut : `{e.statut_collecte}`")
+                    lines.append(f"- [CRITIQUE] **{e.nom}** ({e.ip}) : score {e.score_sante}% · Statut : `{e.statut_collecte}`")
             else:
-                lines.append("✅ Aucun équipement n'est actuellement en seuil critique.")
+                lines.append("[OK] Aucun équipement n'est actuellement en seuil critique.")
 
             if degrades:
                 lines.append("\n**Équipements dégradés (50% - 79%) :**")
                 for e in degrades:
-                    lines.append(f"- 🟠 **{e.nom}** ({e.ip}) : score de {e.score_sante}% (Uptime: {round(e.uptime_secondes / 3600, 1)}h)")
+                    lines.append(f"- [ATTENTION] **{e.nom}** ({e.ip}) : score {e.score_sante}% (Uptime: {round(e.uptime_secondes / 3600, 1)}h)")
 
-            lines.append(f"\n*Synthèse : {len(sains)} sains, {len(degrades)} dégradés, {len(critiques)} critiques sur {len(equipements)} nœuds analysés.*")
+            lines.append(f"\n*Synthèse d'inventaire : {len(sains)} conformes, {len(degrades)} dégradés, {len(critiques)} critiques sur {len(equipements)} nœuds supervisés.*")
             return {
                 "response": "\n".join(lines),
                 "sources": sources,
@@ -182,19 +213,19 @@ class AssistantService:
         if any(w in q_lower for w in ["ttf", "prédiction", "prediction", "saturation", "disque", "panne", "imminent"]):
             sources.append("Supervision Prédictive")
             imminent = [p for p in predictions if p.ttf_estime_heures is not None and p.ttf_estime_heures < 168.0]
-            lines = ["### ⏳ Analyse Prédictive & Time-To-Failure (TTF)\n"]
+            lines = ["### Analyse Prédictive & Time-To-Failure (TTF)\n"]
             if imminent:
-                lines.append(f"⚠️ **{len(imminent)} équipement(s) sous risque de saturation sous 7 jours :**\n")
+                lines.append(f"**[ALERTE PRÉDICTIVE] {len(imminent)} ressource(s) à risque de saturation sous 7 jours :**\n")
                 for p in imminent:
                     nom = p.equipement.nom if p.equipement else "Équipement"
                     lines.append(
-                        f"- 🔴 **{nom}** : {p.metrique} actuelle à **{round(p.valeur_actuelle, 1)}%** "
-                        f"(Progression estimée : `+{round(p.pente_horaire, 2)}%/h`). "
-                        f"Temps restant estimé avant seuil critique : **~{round(p.ttf_estime_heures, 1)} heures** "
+                        f"- [CRITIQUE] **{nom}** : métrique {p.metrique} à **{round(p.valeur_actuelle, 1)}%** "
+                        f"(Tendance : `+{round(p.pente_horaire, 2)}%/h`). "
+                        f"Délai estimé avant rupture : **~{round(p.ttf_estime_heures, 1)} heures** "
                         f"(Indice de confiance : {p.indice_confiance}, R² : {round(p.r2_score, 2)})."
                     )
             else:
-                lines.append("✅ **Toutes les métriques extrapolées sont stables.** Aucun équipement ne dépasse son seuil d'alerte dans les 7 prochains jours.")
+                lines.append("[OK] **Toutes les métriques extrapolées sont nominales.** Aucun dépassement de seuil projeté sous 7 jours.")
 
             return {
                 "response": "\n".join(lines),
@@ -209,18 +240,18 @@ class AssistantService:
         # 3. Sécurité / Attaques / Isolation Forest / Force brute
         if any(w in q_lower for w in ["sécurité", "securite", "attaque", "brute", "anomalie", "rgpd", "intrusion"]):
             sources.append("Cybersécurité AIOps")
-            lines = ["### 🛡️ Diagnostic Cybersécurité & Détection d'Anomalies\n"]
+            lines = ["### Diagnostic Cybersécurité & Détection d'Anomalies (Isolation Forest)\n"]
             if anomalies:
-                lines.append(f"🚨 **{len(anomalies)} anomalie(s) détectée(s) par l'Isolation Forest :**\n")
+                lines.append(f"**[INCIDENTS DÉTECTÉS] {len(anomalies)} anomalie(s) identifiée(s) :**\n")
                 for a in anomalies[:5]:
                     lines.append(
-                        f"- **[{a.severite}]** Type: `{a.type_evenement}` | IP masquée RGPD: `{a.source_ip_anonymisee}` "
-                        f"| Fréquence: **{a.tentatives_minute} tent./min** | Score anomalie: `{round(a.score_anomalie, 3)}`"
+                        f"- [{a.severite.upper()}] Type: `{a.type_evenement}` | IP Source (RGPD): `{a.source_ip_anonymisee}` "
+                        f"| Fréquence: **{a.tentatives_minute} req/min** | Score d'anomalie: `{round(a.score_anomalie, 3)}`"
                     )
             else:
-                lines.append("✅ Aucun incident ou attaque par force brute suspecte détecté récemment.")
+                lines.append("[CONFORME] Aucune activité suspecte ou anomalie de connexion détectée sur la période.")
 
-            lines.append("\n*Note de conformité : Toutes les adresses IP sources externes sont anonymisées conformément aux exigences RGPD de la CNIL.*")
+            lines.append("\n*Conformité réglementaire : Les adresses IP sources internes/externes sont traitées selon le principe de minimisation RGPD.*")
             return {
                 "response": "\n".join(lines),
                 "sources": sources,
@@ -240,23 +271,18 @@ class AssistantService:
                 cis_results.append((dev_id, rep["score"], len(rep["violations"])))
 
             cis_results.sort(key=lambda x: x[1])
-            lines = ["### 🔒 Audit de Conformité CIS Benchmark Cisco IOS\n"]
-            lines.append("Scores de conformité des équipements audités :\n")
+            lines = ["### Audit de Conformité CIS Benchmark Cisco IOS\n"]
+            lines.append("Niveau de durcissement des équipements inventoriés :\n")
             for dev, score, nb_viols in cis_results:
-                icon = "🟢" if score >= 80 else ("🟠" if score >= 60 else "🔴")
-                lines.append(f"- {icon} **{dev}** : **{score}%** de conformité ({nb_viols} violation(s))")
+                status_tag = "[CONFORME]" if score >= 80 else ("[ATTENTION]" if score >= 60 else "[NON-CONFORME]")
+                lines.append(f"- {status_tag} **{dev}** : **{score}%** de conformité ({nb_viols} écart(s))")
 
-            worst = cis_results[0]
-            lines.append(
-                f"\n⚠️ L'équipement le plus vulnérable est **{worst[0]}** ({worst[1]}%). "
-                f"Il présente des non-conformités critiques telles que l'accès Telnet actif ou l'utilisation de mots de passe en clair."
-            )
             return {
                 "response": "\n".join(lines),
                 "sources": sources,
                 "suggested_followups": [
-                    f"Quelles sont les remédiations pour {worst[0]} ?",
-                    "Comment visualiser le diff de configuration ?",
+                    "Afficher le détail des violations sur le routeur Edge",
+                    "Lancer un audit CIS complet sur l'ensemble du lab",
                 ],
                 "mode": "rag_local",
             }
@@ -266,7 +292,7 @@ class AssistantService:
             sources.append("Administration PRA")
             sources.append("Gouvernance ISO 27001")
             lines = [
-                "### 💾 Plan de Continuité & Sauvegardes d'Infrastructure (PRA)\n",
+                "### Plan de Continuité & Sauvegardes d'Infrastructure (PRA)\n",
                 "Le dispositif de résilience opérationnelle Sentinelle AIOps garantit :",
                 "- **Chiffrement au repos** : Algorithme AES-256 (Fernet) avec scellement sécurisé.",
                 "- **Contrôle d'intégrité** : Empreinte cryptographique SHA-256 calculée à chaque instantané.",
@@ -287,7 +313,7 @@ class AssistantService:
         sources.extend(["Gestion de Parc", "Supervision", "Sécurité", "NetDevOps"])
         crit_count = sum(1 for e in equipements if e.score_sante < 50.0)
         lines = [
-            "### 🌐 Synthèse Globale Sentinelle AIOps\n",
+            "### Synthèse Globale Sentinelle AIOps\n",
             f"- **Parc réseau** : {len(equipements)} équipements actifs, {crit_count} critique(s).",
             f"- **Alertes en cours** : {len(alertes)} active(s), dont {sum(1 for a in alertes if a.severite == 'CRITICAL')} critique(s).",
             f"- **Surveillance prédictive** : {len(predictions)} modèles linéaires entraînés avec calcul de Time-To-Failure.",
@@ -318,7 +344,8 @@ class AssistantService:
             "Tu es Sentinelle Assistant, un expert AIOps en supervision prédictive, administration réseau et cybersécurité pour le BTS SIO SISR. "
             "Réponds de manière professionnelle, précise, concise et en français en t'appuyant STRICTEMENT sur le contexte suivant :\n\n"
             f"{context}\n\n"
-            "Si la réponse nécessite des actions techniques, donne des commandes concrètes ou des étapes de remédiation."
+            "Si la réponse nécessite des actions techniques, donne des commandes concrètes ou des étapes de remédiation. "
+            "N'utilise aucun émoji. Emploie uniquement une nomenclature technique stricte avec des tags de sévérité normalisés tels que [CRITIQUE], [MAJEUR], [MINEUR], [CONFORME], [ALERTE]."
         )
 
         try:
@@ -333,7 +360,8 @@ class AssistantService:
                 )
                 if res.status_code == 200:
                     resp_data = res.json()
-                    answer_text = resp_data.get("response", "").strip()
+                    raw_answer = resp_data.get("response", "").strip()
+                    answer_text = cls._sanitize_clinical_text(raw_answer)
                     if answer_text:
                         return {
                             "response": answer_text,
@@ -348,4 +376,6 @@ class AssistantService:
             # Ollama non joignable -> bascule automatique transparente sur le moteur RAG local
             pass
 
-        return cls._local_fallback_answer(message, db)
+        fallback = cls._local_fallback_answer(message, db)
+        fallback["response"] = cls._sanitize_clinical_text(fallback["response"])
+        return fallback

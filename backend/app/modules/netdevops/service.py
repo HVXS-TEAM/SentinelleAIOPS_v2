@@ -274,13 +274,18 @@ _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 
+_UNICODE_EMOJI_RE = re.compile(
+    r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2300-\u23FF\uFE0F]"
+)
+
+
 async def _get_llm_recommendations(violations: list[dict[str, Any]], device_id: str) -> str:
     """
     Appelle Ollama localement pour générer des recommandations en langage naturel.
     Retourne un texte de fallback si Ollama n'est pas disponible.
     """
     if not violations:
-        return "✅ Aucune violation détectée. La configuration est conforme au CIS Benchmark."
+        return "[CONFORME] Aucune violation détectée. La configuration est conforme au CIS Benchmark."
 
     violations_text = "\n".join(
         f"- [{v['severity']}] {v['id']} – {v['title']}: {v['remediation']}"
@@ -292,7 +297,8 @@ async def _get_llm_recommendations(violations: list[dict[str, Any]], device_id: 
         f"L'équipement '{device_id}' présente les non-conformités CIS suivantes :\n\n"
         f"{violations_text}\n\n"
         f"Rédige un rapport de recommandations concis (max 200 mots) en français, "
-        f"priorisé par criticité. Commence par les risques CRITICAL, puis HIGH, puis MEDIUM."
+        f"priorisé par criticité. Commence par les risques CRITICAL, puis HIGH, puis MEDIUM. "
+        f"N'utilise aucun émoji ; utilise uniquement les tags [CRITIQUE], [MAJEUR], [MINEUR], [CONFORME]."
     )
 
     try:
@@ -302,7 +308,8 @@ async def _get_llm_recommendations(violations: list[dict[str, Any]], device_id: 
                 json={"model": _OLLAMA_MODEL, "prompt": prompt, "stream": False},
             )
             response.raise_for_status()
-            return response.json().get("response", "").strip()
+            raw_text = response.json().get("response", "").strip()
+            return _UNICODE_EMOJI_RE.sub("", raw_text).strip()
     except Exception:
         # Fallback : recommandations synthétiques générées localement
         return _generate_local_recommendations(violations, device_id)
@@ -314,20 +321,20 @@ def _generate_local_recommendations(violations: list[dict[str, Any]], device_id:
     high = [v for v in violations if v["severity"] == "HIGH"]
     medium = [v for v in violations if v["severity"] == "MEDIUM"]
 
-    lines = [f"📋 **Rapport de conformité CIS – {device_id}**\n"]
+    lines = [f"[AUDIT CIS] **Rapport de conformité CIS – {device_id}**\n"]
 
     if critical:
-        lines.append("### 🔴 Actions critiques immédiates")
+        lines.append("### [CRITIQUE] Actions critiques immédiates")
         for v in critical:
             lines.append(f"- **{v['id']}** : {v['remediation']}")
 
     if high:
-        lines.append("\n### 🟠 Corrections haute priorité")
+        lines.append("\n### [MAJEUR] Corrections haute priorité")
         for v in high:
             lines.append(f"- **{v['id']}** : {v['remediation']}")
 
     if medium:
-        lines.append("\n### 🟡 Améliorations recommandées")
+        lines.append("\n### [MINEUR] Améliorations recommandées")
         for v in medium:
             lines.append(f"- **{v['id']}** : {v['remediation']}")
 

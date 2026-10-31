@@ -31,6 +31,28 @@
 
 :root {
   color-scheme: dark;
+
+  /* ── Canevas & Surfaces franches (Zéro effet brumeux) ─────────────────── */
+  --color-canvas-bg: #090c0e;           /* Fond noir bleuté profond */
+  --color-sidebar-bg: #0b0f11;          /* Rail latéral d'autorité */
+  --color-card-surface: #14181b;        /* Surface carte bien détachée */
+  --color-card-elevated: #1a1f24;       /* Modales, popovers et drawers */
+
+  /* ── Bordures Nettoyées (1px franc au lieu d'opacités baveuses) ───────── */
+  --border-subtle: #1e2429;             /* Séparateur interne discret */
+  --border-card: #252c32;               /* Contour de carte bien défini */
+  --border-focus: #78d8ba;              /* Contour actif / focus */
+
+  /* ── Couleurs d'Accents Métier (Non délavées) ─────────────────────────── */
+  --accent-teal: #78d8ba;               /* Primaire : Actions, validation, santé OK */
+  --accent-cyan: #81d0f8;               /* Secondaire : Télémétrie, métriques, liens */
+  --accent-blue: #a7c8ff;               /* Tertiaire : Données IP & Réseau */
+  --accent-alert: #ffb4ab;              /* Erreur & Alerte critique (contraste élevé) */
+  --accent-warning: #ffd188;            /* Avertissement / Attention */
+
+  /* ── Typographie ──────────────────────────────────────────────────────── */
+  --text-primary: #e0e3e6;              /* Texte principal net */
+  --text-muted: #8b9792;                /* Libellés secondaires et unités */
 }
 
 html,
@@ -66,43 +88,37 @@ body {
   background: #3e4945;
 }
 
+/* ── Glow réservé EXCLUSIVEMENT aux alertes réelles ─────────────────────── */
 .glow-critical {
-  box-shadow: 0 0 15px rgba(255, 180, 171, 0.25);
+  box-shadow: 0 0 12px rgba(255, 180, 171, 0.4) !important;
 }
 
 .glow-primary {
-  box-shadow: 0 0 15px rgba(120, 216, 186, 0.2);
+  box-shadow: 0 0 10px rgba(120, 216, 186, 0.25) !important;
 }
 
-/* ── THÈME NOCTURNE AVEC ÉCLAIRAGES NÉON (Night Ops) ────────────────────── */
+/* ── THÈME NOCTURNE NET & PRÉCIS (Laser SOC Mode) ────────────────────────── */
 .theme-night header {
-  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(120, 216, 186, 0.18);
+  background-color: var(--color-sidebar-bg) !important;
+  border-bottom: 1px solid var(--border-card) !important;
+  box-shadow: none !important;
 }
 
 .theme-night aside {
-  box-shadow: 4px 0 25px rgba(0, 0, 0, 0.6), 1px 0 0 rgba(120, 216, 186, 0.14);
+  background-color: var(--color-sidebar-bg) !important;
+  border-right: 1px solid var(--border-card) !important;
+  box-shadow: none !important;
 }
 
-/* Halos lumineux sur les cartes la nuit */
+/* Suppression des halos brumeux sur toutes les cartes : bordures 1px nettes et franches */
 .theme-night .night-card-glow,
 .theme-night .bg-\[\#191c1e\],
 .theme-night .bg-\[\#1d2022\] {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(120, 216, 186, 0.03);
+  background-color: var(--color-card-surface) !important;
+  border: 1px solid var(--border-card) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5) !important; /* Ombre courte, zéro halo vert */
 }
 
-/* Phares néon nocturnes */
-@keyframes neon-glow-pulse {
-  0%, 100% {
-    filter: drop-shadow(0 0 6px rgba(120, 216, 186, 0.5));
-  }
-  50% {
-    filter: drop-shadow(0 0 14px rgba(120, 216, 186, 0.85));
-  }
-}
-
-.theme-night .night-neon-glow {
-  animation: neon-glow-pulse 3s infinite ease-in-out;
-}
 
 /* ── THÈME JOUR EXHAUSTIF (Day Mode Haute Lisibilité) ──────────────────── */
 .theme-day {
@@ -444,6 +460,299 @@ body {
   color: #64748b !important;
 }
 
+/* ── ÉTATS DE SURVOL & MENUS EN MODE CLAIR (Haute Harmonisation) ─────────── */
+.theme-day .hover\:bg-\[\#272a2d\]:hover,
+.theme-day .hover\:bg-\[\#1d2022\]:hover,
+.theme-day .hover\:bg-\[\#262b29\]:hover,
+.theme-day .hover\:bg-\[\#313633\]:hover,
+.theme-day .hover\:bg-\[\#1c211e\]:hover,
+.theme-day .hover\:bg-\[\#181f26\]:hover,
+.theme-day .hover\:bg-\[\#161c22\]:hover,
+.theme-day .hover\:bg-\[\#14191c\]:hover {
+  background-color: #f1f5f9 !important;
+}
 
+.theme-day .hover\:text-\[\#e0e3e6\]:hover,
+.theme-day .hover\:text-\[\#dfe4e0\]:hover,
+.theme-day .hover\:text-white:hover {
+  color: #0f172a !important;
+}
 
+/* Menus volants (Dropdowns de notifications et de profil) */
+.theme-day [class*="absolute right-0 top-full"] {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04) !important;
+}
+
+.theme-day [class*="absolute right-0 top-full"] [class*="bg-[#12161a]"],
+.theme-day [class*="absolute right-0 top-full"] [class*="bg-[#1c211e]"] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Couleurs d'accents fonctionnels en mode clair */
+.theme-day .text-\[\#81d0f8\] {
+  color: #0284c7 !important;
+}
+
+.theme-day .text-\[\#ffb4ab\] {
+  color: #dc2626 !important;
+}
+
+.theme-day .bg-\[\#ffb4ab\]\/10,
+.theme-day .bg-\[\#ffb4ab\]\/15 {
+  background-color: #fef2f2 !important;
+  border-color: #fecaca !important;
+}
+
+.theme-day .bg-\[\#81d0f8\]\/10,
+.theme-day .bg-\[\#81d0f8\]\/15 {
+  background-color: #f0f9ff !important;
+  border-color: #bae6fd !important;
+}
+
+/* ── MODALE PARAMÈTRES RAPIDES (Thème Nocturne & Mode Clair Bivalent) ─────── */
+
+/* 1. Mode Sombre / Nocturne (Défaut) */
+.quick-settings-modal {
+  background-color: #181d1b !important;
+  color: #dfe4e0 !important;
+  border-color: #3e4945 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(120, 216, 186, 0.08) !important;
+}
+
+.quick-settings-modal .modal-header,
+.quick-settings-modal .modal-footer {
+  background-color: #1c211e !important;
+  border-color: #3e4945 !important;
+}
+
+.quick-settings-modal .modal-header-title {
+  color: #78d8ba !important;
+}
+
+.quick-settings-modal .modal-header-title h3 {
+  color: #dfe4e0 !important;
+}
+
+.quick-settings-modal .modal-close-btn {
+  color: #bdc9c3 !important;
+}
+
+.quick-settings-modal .modal-close-btn:hover {
+  background-color: #262b29 !important;
+  color: #dfe4e0 !important;
+}
+
+.quick-settings-modal .modal-body {
+  background-color: #181d1b !important;
+  color: #dfe4e0 !important;
+}
+
+.quick-settings-modal .modal-section-label {
+  color: #bdc9c3 !important;
+}
+
+.quick-settings-modal .modal-section-icon {
+  color: #78d8ba !important;
+}
+
+.quick-settings-modal .modal-card-inner {
+  background-color: #12161a !important;
+  border-color: rgba(62, 73, 69, 0.5) !important;
+}
+
+.quick-settings-modal .modal-feature-icon {
+  color: #81d0f8 !important;
+}
+
+.quick-settings-modal .modal-text-title {
+  color: #dfe4e0 !important;
+}
+
+.quick-settings-modal .modal-text-subtitle {
+  color: #87938e !important;
+}
+
+.quick-settings-modal .modal-btn-unselected {
+  background-color: #262b29 !important;
+  color: #bdc9c3 !important;
+  border-color: #3e4945 !important;
+}
+
+.quick-settings-modal .modal-btn-unselected:hover {
+  background-color: #313633 !important;
+  color: #dfe4e0 !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.quick-settings-modal .modal-btn-selected {
+  background-color: rgba(120, 216, 186, 0.12) !important;
+  color: #78d8ba !important;
+  border-color: #78d8ba !important;
+}
+
+.quick-settings-modal .modal-switch-track.modal-switch-off {
+  background-color: #272a2d !important;
+}
+
+.quick-settings-modal .modal-switch-track.modal-switch-on {
+  background-color: #78d8ba !important;
+}
+
+.quick-settings-modal .modal-switch-thumb {
+  background-color: #ffffff !important;
+}
+
+.quick-settings-modal .modal-btn-cancel {
+  background-color: #262b29 !important;
+  border-color: #3e4945 !important;
+  color: #dfe4e0 !important;
+}
+
+.quick-settings-modal .modal-btn-cancel:hover {
+  background-color: #313633 !important;
+  color: #ffffff !important;
+}
+
+.quick-settings-modal .modal-btn-apply {
+  background-color: #78d8ba !important;
+  color: #00382b !important;
+}
+
+.quick-settings-modal .modal-btn-apply:hover {
+  background-color: #68c8aa !important;
+}
+
+/* 2. Mode Clair (Day Mode Haute Élégance) */
+.theme-day .modal-backdrop-overlay {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+.theme-day .quick-settings-modal {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.03) !important;
+}
+
+.theme-day .quick-settings-modal .modal-header {
+  background-color: #f8fafc !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+.theme-day .quick-settings-modal .modal-header-title {
+  color: #0d9488 !important;
+}
+
+.theme-day .quick-settings-modal .modal-header-title h3 {
+  color: #0f172a !important;
+}
+
+.theme-day .quick-settings-modal .modal-close-btn {
+  color: #64748b !important;
+}
+
+.theme-day .quick-settings-modal .modal-close-btn:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.theme-day .quick-settings-modal .modal-body {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.theme-day .quick-settings-modal .modal-section-label {
+  color: #475569 !important;
+}
+
+.theme-day .quick-settings-modal .modal-section-icon {
+  color: #0d9488 !important;
+}
+
+.theme-day .quick-settings-modal .modal-card-inner {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+}
+
+.theme-day .quick-settings-modal .modal-feature-icon {
+  color: #0d9488 !important;
+}
+
+.theme-day .quick-settings-modal .modal-text-title {
+  color: #0f172a !important;
+}
+
+.theme-day .quick-settings-modal .modal-text-subtitle {
+  color: #64748b !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-unselected {
+  background-color: #f8fafc !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-unselected:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-selected {
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+  border-color: #0d9488 !important;
+  font-weight: 700 !important;
+}
+
+.theme-day .quick-settings-modal .modal-switch-track.modal-switch-off {
+  background-color: #cbd5e1 !important;
+}
+
+.theme-day .quick-settings-modal .modal-switch-track.modal-switch-on {
+  background-color: #0d9488 !important;
+}
+
+.theme-day .quick-settings-modal .modal-switch-thumb {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+}
+
+.theme-day .quick-settings-modal .modal-footer {
+  background-color: #f8fafc !important;
+  border-top-color: #e2e8f0 !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-cancel {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-cancel:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-apply {
+  background-color: #0d9488 !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(13, 148, 136, 0.2) !important;
+}
+
+.theme-day .quick-settings-modal .modal-btn-apply:hover {
+  background-color: #0f766e !important;
+}
+
+.theme-day .quick-settings-modal .modal-toast {
+  background-color: #ecfdf5 !important;
+  border-color: #99f6e4 !important;
+  color: #065f46 !important;
+}
 

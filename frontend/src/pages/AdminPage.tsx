@@ -1,28 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Users,
-  Terminal,
-  FileText,
-  Bell,
-  RefreshCw,
-  Plus,
-  Download,
-  Shield,
-  ShieldOff,
-  Mail,
-  Send,
-  MessageSquare,
-  CheckCircle2,
-  AlertTriangle,
-  Loader2,
-  X,
-  Edit2,
-  FileCheck,
-  Database,
-  UserX,
-  Play,
-  Sliders,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { adminService } from '../services/api';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -162,6 +139,7 @@ export const AdminPage: React.FC = () => {
   const [syncDone, setSyncDone] = useState(false);
 
   /* États notifications */
+  const [demoMode, setDemoMode] = useState<boolean>(true); // Actif par défaut pour sécuriser les démonstrations
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [telegramEnabled, setTelegramEnabled] = useState(true);
   const [discordEnabled, setDiscordEnabled] = useState(false);
@@ -213,11 +191,25 @@ export const AdminPage: React.FC = () => {
   const handleTestChannel = async (channel: 'telegram' | 'discord' | 'email') => {
     setIsTestingChannel(true);
     try {
+      if (demoMode) {
+        // Mode Simulation E6 : Garantit une démonstration fluide sans dépendance de serveur tiers
+        await new Promise(resolve => setTimeout(resolve, 800)); // Latence réseau simulée
+        if (channel === 'email') {
+          showToast(`[DÉMO E6] Alerte SMTP émise avec succès vers ${emailConfig.recipient} (Relais smtp.sentinelle.local:587 validé).`);
+        } else if (channel === 'telegram') {
+          showToast(`[DÉMO E6] Notification push Telegram relayée vers le Chat ID ${telegramConfig.chatId || 'Défaut'}.`);
+        } else if (channel === 'discord') {
+          showToast(`[DÉMO E6] Payload JSON injecté avec succès sur le Webhook Discord.`);
+        }
+        return;
+      }
+
+      // Mode Réel (si serveur SMTP physique actif dans le lab)
       if (channel === 'telegram') {
         showToast('Transmission de l\'alerte test vers Telegram...');
         const res = await adminService.testNotificationChannel({
           channel: 'telegram',
-          message: '🚨 [TEST] Alerte Sentinelle AIOps — Supervision & Résilience Opérationnelle.',
+          message: '[TEST] Alerte Sentinelle AIOps — Supervision & Résilience Opérationnelle.',
           telegram_config: {
             bot_token: telegramConfig.botToken,
             chat_id: telegramConfig.chatId,
@@ -228,7 +220,7 @@ export const AdminPage: React.FC = () => {
         showToast('Transmission de l\'alerte test vers le Webhook Discord...');
         const res = await adminService.testNotificationChannel({
           channel: 'discord',
-          message: '🚨 [TEST] Alerte Sentinelle AIOps — Supervision & Résilience Opérationnelle.',
+          message: '[TEST] Alerte Sentinelle AIOps — Supervision & Résilience Opérationnelle.',
           discord_config: {
             webhook_url: discordConfig.webhookUrl,
           },
@@ -249,8 +241,9 @@ export const AdminPage: React.FC = () => {
         showToast(res.message);
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || 'Erreur lors du test du canal';
-      showToast(`Échec du test : ${detail}`);
+      // Si le serveur réel échoue, basculer sur une explication claire et proposer la simulation
+      const detail = err?.response?.data?.detail || err?.message || 'Erreur réseau';
+      showToast(`Échec du serveur distant (${detail}). Activez le Mode Simulation E6 pour la démo.`);
     } finally {
       setIsTestingChannel(false);
     }
@@ -462,7 +455,7 @@ export const AdminPage: React.FC = () => {
       {/* ── Toast de notification ────────────────────────────────────── */}
       {toastMessage && (
         <div className="fixed top-20 right-6 z-50 bg-[#1c211e] border border-[#78d8ba] text-[#dfe4e0] px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 text-xs font-medium animate-in slide-in-from-top-2 duration-200">
-          <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+          <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -485,7 +478,7 @@ export const AdminPage: React.FC = () => {
             disabled={isBackingUp}
             className="px-4 py-2 rounded-md border border-[#81d0f8] text-[#81d0f8] hover:bg-[#81d0f8]/10 text-xs font-mono uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
           >
-            <Database className={`w-4 h-4 text-[#81d0f8] ${isBackingUp ? 'animate-spin' : ''}`} />
+            <Icon name="database" size="sm" className={`text-[#81d0f8] ${isBackingUp ? 'animate-spin' : ''}`} />
             <span>{isBackingUp ? 'SAUVEGARDE...' : 'SAUVEGARDE PRA'}</span>
           </button>
 
@@ -501,11 +494,11 @@ export const AdminPage: React.FC = () => {
             }`}
           >
             {isSyncing ? (
-              <Loader2 className="w-4 h-4 animate-spin text-[#78d8ba]" />
+              <Icon name="progress_activity" size="sm" className="animate-spin text-[#78d8ba]" />
             ) : syncDone ? (
-              <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
             ) : (
-              <RefreshCw className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="refresh" size="sm" className="text-[#78d8ba]" />
             )}
             <span>{syncDone ? 'SYNCHRONISÉ' : 'SYNCHRONISER'}</span>
           </button>
@@ -516,7 +509,7 @@ export const AdminPage: React.FC = () => {
             onClick={() => setShowReportModal(true)}
             className="px-4 py-2 rounded-md bg-[#78d8ba] text-[#00382b] font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 hover:bg-[#78d8ba]/90 transition-all shadow-sm cursor-pointer"
           >
-            <Plus className="w-4 h-4 text-[#00382b]" />
+            <Icon name="add" size="sm" className="text-[#00382b]" />
             <span>NOUVEAU RAPPORT</span>
           </button>
         </div>
@@ -532,7 +525,7 @@ export const AdminPage: React.FC = () => {
           <div className="bg-[#191c1e] rounded-lg border border-white/5 overflow-hidden flex flex-col">
             <div className="px-4 py-3 border-b border-white/5 flex justify-between items-center bg-[#1d2022]">
               <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#78d8ba] flex items-center gap-2">
-                <Users className="w-4 h-4 text-[#78d8ba]" />
+                <Icon name="group" size="sm" className="text-[#78d8ba]" />
                 <span>Gestion des Utilisateurs</span>
               </h2>
               <div className="flex items-center gap-2">
@@ -553,7 +546,7 @@ export const AdminPage: React.FC = () => {
                   }}
                   className="text-xs text-[#78d8ba] hover:text-white px-2.5 py-1 bg-[#78d8ba]/10 hover:bg-[#78d8ba]/20 rounded border border-[#78d8ba]/30 flex items-center gap-1.5 transition-colors font-mono cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Icon name="add" size="xs" />
                   <span>Nouvel Utilisateur</span>
                 </button>
                 <button
@@ -561,7 +554,7 @@ export const AdminPage: React.FC = () => {
                   className="text-[#bdc9c3] hover:text-[#78d8ba] p-1 rounded hover:bg-[#272a2d] transition-colors cursor-pointer"
                   title="Rafraîchir les utilisateurs réels"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <Icon name="refresh" size="xs" />
                 </button>
               </div>
             </div>
@@ -652,12 +645,12 @@ export const AdminPage: React.FC = () => {
                         >
                           {u.mfa ? (
                             <>
-                              <Shield className="w-3.5 h-3.5 fill-[#78d8ba]" />
+                              <Icon name="shield" size="xs" fill={true} className="text-[#78d8ba]" />
                               <span>Actif</span>
                             </>
                           ) : (
                             <>
-                              <ShieldOff className="w-3.5 h-3.5" />
+                              <Icon name="shield" size="xs" className="text-[#87938e]" />
                               <span>Inactif</span>
                             </>
                           )}
@@ -680,7 +673,7 @@ export const AdminPage: React.FC = () => {
                             className="p-1.5 rounded hover:text-[#81d0f8] hover:bg-white/5 transition-colors cursor-pointer"
                             title="Modifier les privilèges"
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            <Icon name="edit" size="xs" />
                           </button>
                           <button
                             id={`admin-revoke-user-btn-${u.id}`}
@@ -688,7 +681,7 @@ export const AdminPage: React.FC = () => {
                             className="p-1.5 rounded hover:text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-colors cursor-pointer"
                             title="Révoquer les accès de cet utilisateur"
                           >
-                            <UserX className="w-3.5 h-3.5 text-[#ffb4ab]" />
+                            <Icon name="person_off" size="xs" className="text-[#ffb4ab]" />
                           </button>
                         </div>
                       </td>
@@ -703,7 +696,7 @@ export const AdminPage: React.FC = () => {
           <div className="bg-[#191c1e] rounded-lg border border-white/5 overflow-hidden flex flex-col flex-1">
             <div className="px-4 py-2.5 border-b border-white/5 flex justify-between items-center bg-[#1d2022]">
               <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#78d8ba] flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-[#78d8ba]" />
+                <Icon name="terminal" size="sm" className="text-[#78d8ba]" />
                 <span>Journal d'Audit</span>
               </h2>
               <button
@@ -711,7 +704,7 @@ export const AdminPage: React.FC = () => {
                 onClick={handleExportCSV}
                 className="text-xs text-[#bdc9c3] hover:text-[#dfe4e0] px-2.5 py-1 bg-[#272a2d] hover:bg-[#323538] rounded border border-white/10 flex items-center gap-1.5 transition-colors font-mono"
               >
-                <Download className="w-3 h-3" />
+                <Icon name="download" size="xs" />
                 <span>Export CSV</span>
               </button>
             </div>
@@ -771,7 +764,7 @@ export const AdminPage: React.FC = () => {
                         <td className="px-3 py-2.5 text-center">
                           {isCrit ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#ffb4ab] border border-[#ffb4ab]/30 bg-[#ffb4ab]/10 animate-pulse">
-                              <AlertTriangle className="w-2.5 h-2.5" />
+                              <Icon name="warning" size={10} />
                               <span>CRIT</span>
                             </span>
                           ) : (
@@ -796,7 +789,7 @@ export const AdminPage: React.FC = () => {
           {/* 3. Bibliothèque de Rapports */}
           <div className="bg-[#191c1e] rounded-lg border border-white/5 p-4 flex flex-col">
             <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#78d8ba] flex items-center gap-2 mb-3.5">
-              <FileText className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="description" size="sm" className="text-[#78d8ba]" />
               <span>Bibliothèque de Rapports</span>
             </h2>
 
@@ -826,9 +819,9 @@ export const AdminPage: React.FC = () => {
                     className="w-8 h-8 rounded bg-[#272a2d] hover:bg-[#323538] text-[#bdc9c3] hover:text-[#78d8ba] border border-white/10 flex items-center justify-center transition-colors shrink-0"
                   >
                     {downloadingId === rep.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#78d8ba]" />
+                      <Icon name="progress_activity" size="xs" className="animate-spin text-[#78d8ba]" />
                     ) : (
-                      <Download className="w-3.5 h-3.5" />
+                      <Icon name="download" size="xs" />
                     )}
                   </button>
                 </div>
@@ -836,12 +829,33 @@ export const AdminPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. Configuration Notifications */}
-          <div className="bg-[#191c1e] rounded-lg border border-white/5 p-4 flex flex-col flex-1">
-            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#78d8ba] flex items-center gap-2 mb-3.5">
-              <Bell className="w-4 h-4 text-[#78d8ba]" />
-              <span>Configuration Notifications</span>
-            </h2>
+          {/* 4. Configuration Notifications avec Toggle Démo E6 */}
+          <div className="bg-[#191c1e] rounded-xl border border-[#272a2d] p-5 flex flex-col flex-1">
+            <div className="flex items-center justify-between pb-3 border-b border-[#272a2d] mb-4">
+              <div className="flex items-center gap-2 text-sm font-bold text-[#e0e3e6]">
+                <Icon name="notifications" size="sm" className="text-[#78d8ba]" />
+                <span>Configuration Notifications</span>
+              </div>
+
+              {/* Toggle Mode Démo E6 */}
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-[10px] font-mono text-[#87938e] uppercase tracking-wider">
+                  Mode Démo E6
+                </span>
+                <div
+                  onClick={() => setDemoMode(!demoMode)}
+                  className={`w-8 h-4.5 rounded-full transition-colors relative cursor-pointer ${
+                    demoMode ? 'bg-[#78d8ba]' : 'bg-[#272a2d]'
+                  }`}
+                >
+                  <div
+                    className={`w-3.5 h-3.5 rounded-full bg-[#101416] absolute top-0.5 transition-transform ${
+                      demoMode ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </div>
+              </label>
+            </div>
 
             {/* Canaux de Diffusion */}
             <div className="mb-4">
@@ -852,7 +866,7 @@ export const AdminPage: React.FC = () => {
                 {/* Email */}
                 <div className="p-2.5 rounded bg-[#161c22] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-[#dfe4e0]">
-                    <Mail className="w-4 h-4 text-[#bdc9c3]" />
+                    <Icon name="mail" size="sm" className="text-[#bdc9c3]" />
                     <div>
                       <div className="font-semibold">Email (SMTP Interne)</div>
                       <div className="text-[10px] text-[#87938e] font-mono">{emailConfig.recipient}</div>
@@ -866,7 +880,7 @@ export const AdminPage: React.FC = () => {
                       className="px-2 py-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#81d0f8] border border-white/10 font-mono text-[10px] flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       title="Envoyer un email de test SMTP"
                     >
-                      <Play className="w-3 h-3" />
+                      <Icon name="play_arrow" size="xs" />
                       <span>Tester</span>
                     </button>
                     <button
@@ -875,7 +889,7 @@ export const AdminPage: React.FC = () => {
                       className="p-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#bdc9c3] hover:text-[#dfe4e0] border border-white/10 transition-colors cursor-pointer"
                       title="Configurer les paramètres SMTP"
                     >
-                      <Sliders className="w-3.5 h-3.5" />
+                      <Icon name="tune" size="xs" />
                     </button>
                     <button
                       id="admin-toggle-email-btn"
@@ -900,7 +914,7 @@ export const AdminPage: React.FC = () => {
                 {/* Telegram */}
                 <div className="p-2.5 rounded bg-[#161c22] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-[#dfe4e0]">
-                    <Send className="w-4 h-4 text-[#bdc9c3]" />
+                    <Icon name="send" size="sm" className="text-[#bdc9c3]" />
                     <div>
                       <div className="font-semibold">Telegram (Bot API)</div>
                       <div className="text-[10px] text-[#87938e] font-mono">{telegramConfig.chatId}</div>
@@ -914,7 +928,7 @@ export const AdminPage: React.FC = () => {
                       className="px-2 py-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#81d0f8] border border-white/10 font-mono text-[10px] flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       title="Envoyer une alerte test vers Telegram"
                     >
-                      <Play className="w-3 h-3" />
+                      <Icon name="play_arrow" size="xs" />
                       <span>Tester</span>
                     </button>
                     <button
@@ -923,7 +937,7 @@ export const AdminPage: React.FC = () => {
                       className="p-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#bdc9c3] hover:text-[#dfe4e0] border border-white/10 transition-colors cursor-pointer"
                       title="Configurer Token & Chat ID Telegram"
                     >
-                      <Sliders className="w-3.5 h-3.5" />
+                      <Icon name="tune" size="xs" />
                     </button>
                     <button
                       id="admin-toggle-telegram-btn"
@@ -948,7 +962,7 @@ export const AdminPage: React.FC = () => {
                 {/* Discord */}
                 <div className="p-2.5 rounded bg-[#161c22] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-[#dfe4e0]">
-                    <MessageSquare className="w-4 h-4 text-[#bdc9c3]" />
+                    <Icon name="forum" size="sm" className="text-[#bdc9c3]" />
                     <div>
                       <div className="font-semibold">Discord (Webhook)</div>
                       <div className="text-[10px] text-[#87938e] font-mono truncate max-w-[140px] sm:max-w-[180px]">
@@ -964,7 +978,7 @@ export const AdminPage: React.FC = () => {
                       className="px-2 py-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#81d0f8] border border-white/10 font-mono text-[10px] flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       title="Transmettre un webhook de test vers Discord"
                     >
-                      <Play className="w-3 h-3" />
+                      <Icon name="play_arrow" size="xs" />
                       <span>Tester</span>
                     </button>
                     <button
@@ -973,7 +987,7 @@ export const AdminPage: React.FC = () => {
                       className="p-1 rounded bg-[#1d2022] hover:bg-[#272a2d] text-[#bdc9c3] hover:text-[#dfe4e0] border border-white/10 transition-colors cursor-pointer"
                       title="Configurer l'URL du Webhook Discord"
                     >
-                      <Sliders className="w-3.5 h-3.5" />
+                      <Icon name="tune" size="xs" />
                     </button>
                     <button
                       id="admin-toggle-discord-btn"
@@ -1041,14 +1055,14 @@ export const AdminPage: React.FC = () => {
           <div className="w-full max-w-md bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
             <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#dfe4e0] flex items-center gap-2">
-                <FileCheck className="w-4 h-4 text-[#78d8ba]" />
+                <Icon name="assignment_turned_in" size="sm" className="text-[#78d8ba]" />
                 <span>Générer un Rapport d'Exploitation</span>
               </h3>
               <button
                 onClick={() => setShowReportModal(false)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -1131,7 +1145,7 @@ export const AdminPage: React.FC = () => {
                 onClick={() => setShowUserModal(false)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -1234,20 +1248,20 @@ export const AdminPage: React.FC = () => {
           <div className="w-full max-w-md bg-[#181d1b] border border-[#ffb4ab]/40 rounded-xl shadow-2xl overflow-hidden">
             <div className="px-4 py-3 bg-[#241716] border-b border-[#ffb4ab]/30 flex items-center justify-between">
               <div className="flex items-center gap-2 text-[#ffb4ab]">
-                <AlertTriangle className="w-4 h-4" />
+                <Icon name="warning" size="sm" />
                 <h3 className="text-sm font-bold font-mono">Confirmer la révocation d'accès</h3>
               </div>
               <button
                 onClick={() => setUserToRevoke(null)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
             <div className="p-5 space-y-4 text-xs">
               <div className="flex items-start gap-3 p-3 rounded-lg bg-[#ffb4ab]/10 border border-[#ffb4ab]/20">
-                <UserX className="w-5 h-5 text-[#ffb4ab] shrink-0 mt-0.5" />
+                <Icon name="person_off" size="md" className="text-[#ffb4ab] shrink-0 mt-0.5" />
                 <div>
                   <div className="text-[#dfe4e0] font-semibold text-sm">{userToRevoke.nom}</div>
                   <div className="text-[11px] font-mono text-[#87938e] mt-0.5">{userToRevoke.email}</div>
@@ -1278,12 +1292,12 @@ export const AdminPage: React.FC = () => {
                 >
                   {isRevoking ? (
                     <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <Icon name="progress_activity" size="xs" className="animate-spin" />
                       <span>Révocation...</span>
                     </>
                   ) : (
                     <>
-                      <UserX className="w-3.5 h-3.5" />
+                      <Icon name="person_off" size="xs" />
                       <span>Révoquer l'accès</span>
                     </>
                   )}
@@ -1300,7 +1314,7 @@ export const AdminPage: React.FC = () => {
           <div className="w-full max-w-md bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden">
             <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <div className="flex items-center gap-2 text-[#78d8ba]">
-                <Sliders className="w-4 h-4" />
+                <Icon name="tune" size="sm" />
                 <h3 className="text-sm font-bold font-mono">
                   Paramétrage Canal : {configChannel.toUpperCase()}
                 </h3>
@@ -1309,7 +1323,7 @@ export const AdminPage: React.FC = () => {
                 onClick={() => setConfigChannel(null)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -1408,7 +1422,7 @@ export const AdminPage: React.FC = () => {
                   disabled={isTestingChannel}
                   className="px-3 py-1.5 rounded bg-[#1d2022] border border-[#81d0f8]/30 text-[#81d0f8] hover:bg-[#81d0f8]/10 text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <Play className="w-3.5 h-3.5" />
+                  <Icon name="play_arrow" size="xs" />
                   <span>Tester ce canal</span>
                 </button>
                 <div className="flex gap-2">

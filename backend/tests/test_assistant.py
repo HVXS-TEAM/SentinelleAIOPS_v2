@@ -31,33 +31,44 @@ def test_build_system_context():
 
 
 def test_semantic_intents_local_fallback():
-    """Vérifie le routage sémantique et la précision des réponses en mode RAG local."""
+    """Vérifie le routage sémantique, la nomenclature clinique et l'absence d'émojis en mode RAG local."""
+    forbidden_emojis = ["🔴", "🟠", "🟡", "🟢", "🚨", "⚠️", "🔍", "📊", "⏳", "🛡️", "🔒", "✅"]
     db = SessionLocal()
     try:
         # 1. Question Santé du parc
         res_sante = AssistantService._local_fallback_answer("Quels sont les équipements en état critique ou dégradé ?", db)
-        assert "État de santé" in res_sante["response"]
+        assert "État de Santé Opérationnel du Parc Informatique" in res_sante["response"]
         assert "Gestion de Parc" in res_sante["sources"]
         assert len(res_sante["suggested_followups"]) > 0
+        for emoji in forbidden_emojis:
+            assert emoji not in res_sante["response"]
 
         # 2. Question Prédictions TTF
         res_ttf = AssistantService._local_fallback_answer("Y a-t-il des saturations de disque prévues dans les prochains jours ?", db)
         assert "Analyse Prédictive" in res_ttf["response"]
         assert "Supervision Prédictive" in res_ttf["sources"]
+        for emoji in forbidden_emojis:
+            assert emoji not in res_ttf["response"]
 
         # 3. Question Sécurité
         res_sec = AssistantService._local_fallback_answer("Quelles sont les attaques par force brute ou anomalies récentes ?", db)
         assert "Cybersécurité" in res_sec["response"]
         assert "Cybersécurité AIOps" in res_sec["sources"]
+        for emoji in forbidden_emojis:
+            assert emoji not in res_sec["response"]
 
         # 4. Question CIS Benchmark
         res_cis = AssistantService._local_fallback_answer("Quel équipement Cisco a le pire score de conformité CIS ?", db)
         assert "CIS Benchmark" in res_cis["response"]
         assert "NetDevOps CIS" in res_cis["sources"]
+        for emoji in forbidden_emojis:
+            assert emoji not in res_cis["response"]
 
         # 5. Question Générale
         res_gen = AssistantService._local_fallback_answer("Bonjour, fais-moi un résumé du réseau.", db)
         assert "Synthèse Globale" in res_gen["response"]
+        for emoji in forbidden_emojis:
+            assert emoji not in res_gen["response"]
     finally:
         db.close()
 
@@ -97,13 +108,15 @@ def test_api_assistant_endpoints():
 
 
 def test_config_snippet_and_file_analysis():
-    """Vérifie l'analyse experte d'un fichier de configuration Cisco importé."""
+    """Vérifie l'analyse de conformité CIS d'un fichier de configuration Cisco importé."""
     db = SessionLocal()
     try:
         sample_cfg = "[Fichier importé : switch-core.cfg]\nline vty 0 4\n login\n password cisco\n!"
         res = AssistantService._local_fallback_answer(sample_cfg, db)
-        assert "Diagnostic Expert de Configuration" in res["response"]
-        assert "Parseur Sémantique NetDevOps" in res["sources"]
+        assert "Diagnostic de Configuration & Analyse de Conformité CIS" in res["response"]
+        assert "Audit NetDevOps CIS" in res["sources"]
+        assert "[CRITIQUE - CIS 1.1.1]" in res["response"]
+        assert "[CRITIQUE - CIS 1.2.2]" in res["response"]
         assert "configure terminal" in res["response"]
         assert len(res["suggested_followups"]) > 0
     finally:
@@ -119,4 +132,17 @@ def test_pra_and_continuity_intent():
         assert "Administration PRA" in res["sources"]
     finally:
         db.close()
+
+
+def test_sanitize_clinical_text_removes_all_emojis():
+    """Vérifie que tout émoji émis par Ollama LLM est remplacé par des tags cliniques ou purgé."""
+    raw_llm = "### 📊 Rapport 🛡️\n- 🔴 Serveur critique 🚨\n- 🟠 Alerte majeure\n- 🟡 Mineur ⚠️\n- 🟢 Conforme ✅"
+    cleaned = AssistantService._sanitize_clinical_text(raw_llm)
+    assert "[CRITIQUE]" in cleaned
+    assert "[MAJEUR]" in cleaned
+    assert "[MINEUR]" in cleaned
+    assert "[ALERTE]" in cleaned
+    assert "[CONFORME]" in cleaned
+    for emoji in ["🔴", "🟠", "🟡", "🟢", "🚨", "⚠️", "🔍", "📊", "⏳", "🛡️", "🔒", "✅"]:
+        assert emoji not in cleaned
 

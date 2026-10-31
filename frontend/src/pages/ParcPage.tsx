@@ -1,30 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  Router,
-  Shield,
-  Server,
-  Layers,
-  Search,
-  Filter,
-  Plus,
-  X,
-  Terminal,
-  CheckCircle2,
-  AlertTriangle,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  Send,
-  Zap,
-  Download,
-  RefreshCw,
-  Trash2,
-  Radio,
-  Wifi,
-  Cpu,
-  Copy,
-  Sparkles,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { parcService } from '../services/api';
 import type { LocalNetworkInfo, RealNetworkScanResponse } from '../types';
 
@@ -344,6 +319,34 @@ export const ParcPage: React.FC = () => {
   const [sshMode, setSshMode] = useState<'REAL_SSH' | 'EMULATED_CLI' | 'IDLE'>('IDLE');
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
+  /* Exportation de la session CLI en fichier .log horodaté pour traçabilité */
+  const handleExportSshLog = () => {
+    if (!selectedEq || sshHistory.length === 0) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `session_${selectedEq.name}_${timestamp}.log`;
+    const logContent = [
+      `======================================================================`,
+      `SENTINELLE AIOPS — JOURNAL DE SESSION TERMINAL SSH`,
+      `Équipement cible : ${selectedEq.name} (${selectedEq.ip})`,
+      `Date de session   : ${new Date().toLocaleString()}`,
+      `Opérateur        : Administrateur Système & Réseau`,
+      `======================================================================\n`,
+      ...sshHistory
+    ].join('\n');
+
+    const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Journal de session exporté : ${filename}`);
+  };
+
 
   /* Zoom topologique */
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -613,7 +616,7 @@ export const ParcPage: React.FC = () => {
         {/* Toast dynamique */}
         {toastMsg && (
           <div className="fixed bottom-6 right-6 z-50 bg-[#1d2022] border border-[#78d8ba] text-[#78d8ba] px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+            <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
             {toastMsg}
           </div>
         )}
@@ -632,7 +635,7 @@ export const ParcPage: React.FC = () => {
               className="px-3 py-1.5 rounded-md text-xs font-semibold bg-[#78d8ba]/15 border border-[#78d8ba] text-[#78d8ba] hover:bg-[#78d8ba]/25 flex items-center gap-1.5 transition-all shadow-sm shadow-[#78d8ba]/10 cursor-pointer"
               title="Scanner et découvrir les vrais équipements physiques connectés (Box, Switch, PCs)"
             >
-              <Radio className="w-3.5 h-3.5 text-[#78d8ba] animate-pulse" />
+              <Icon name="sensors" size="xs" className="text-[#78d8ba] animate-pulse" />
               <span>Découverte Réseau Réel</span>
             </button>
 
@@ -643,7 +646,7 @@ export const ParcPage: React.FC = () => {
               disabled={isScanning}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#1c211e] border border-[#3e4945] text-[#78d8ba] hover:border-[#78d8ba] flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+              <Icon name="refresh" size="xs" className={isScanning ? 'animate-spin' : ''} />
               <span>{isScanning ? 'Scan en cours...' : 'Scan SNMP'}</span>
             </button>
 
@@ -655,7 +658,7 @@ export const ParcPage: React.FC = () => {
               disabled={isExporting}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#1c211e] border border-[#3e4945] text-[#dfe4e0] hover:border-[#78d8ba] hover:text-[#78d8ba] flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Icon name="download" size="xs" />
               <span>Exporter CSV</span>
             </button>
 
@@ -670,7 +673,7 @@ export const ParcPage: React.FC = () => {
                     : 'bg-[#1c211e] border-[#3e4945] text-[#dfe4e0] hover:bg-[#262b29]'
                 }`}
               >
-                <Filter className="w-3.5 h-3.5" />
+                <Icon name="filter_list" size="xs" />
                 <span>{statusFilter === 'all' ? 'Filtrer' : `Filtre: ${statusFilter}`}</span>
               </button>
 
@@ -708,7 +711,7 @@ export const ParcPage: React.FC = () => {
               onClick={() => setShowAddModal(true)}
               className="px-3 py-1.5 rounded-md text-xs font-medium bg-[#78d8ba] text-[#00382b] flex items-center gap-1.5 hover:bg-[#78d8ba]/90 transition-all font-semibold shadow-sm cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Icon name="add" size="xs" />
               <span>Ajouter un équipement</span>
             </button>
           </div>
@@ -729,21 +732,21 @@ export const ParcPage: React.FC = () => {
               className="bg-[#262b29]/90 border border-[#3e4945]/40 text-[#dfe4e0] p-1.5 rounded hover:bg-[#313633] transition-colors"
               title="Zoomer"
             >
-              <ZoomIn className="w-3 h-3" />
+              <Icon name="zoom_in" size="xs" />
             </button>
             <button
               onClick={() => setZoomLevel(prev => Math.max(prev - 0.15, 0.7))}
               className="bg-[#262b29]/90 border border-[#3e4945]/40 text-[#dfe4e0] p-1.5 rounded hover:bg-[#313633] transition-colors"
               title="Dézoomer"
             >
-              <ZoomOut className="w-3 h-3" />
+              <Icon name="zoom_out" size="xs" />
             </button>
             <button
               onClick={() => setZoomLevel(1)}
               className="bg-[#262b29]/90 border border-[#3e4945]/40 text-[#dfe4e0] p-1.5 rounded hover:bg-[#313633] transition-colors"
               title="Ajuster la vue"
             >
-              <Maximize2 className="w-3 h-3" />
+              <Icon name="fit_screen" size="xs" />
             </button>
           </div>
 
@@ -893,11 +896,11 @@ export const ParcPage: React.FC = () => {
                 className="p-1 rounded text-[#bdc9c3] hover:text-[#dfe4e0] hover:bg-[#262b29] transition-colors"
                 title="Actualiser la liste du parc"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#78d8ba]' : ''}`} />
+                <Icon name="refresh" size="xs" className={isLoading ? 'animate-spin text-[#78d8ba]' : ''} />
               </button>
             </div>
             <div className="relative w-56">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#bdc9c3]" />
+              <Icon name="search" size="xs" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#bdc9c3]" />
               <input
                 id="parc-table-search"
                 type="text"
@@ -956,13 +959,13 @@ export const ParcPage: React.FC = () => {
                               : 'text-[#d37768]'
                           }`}>
                             {eq.type === 'Firewall' ? (
-                              <Shield className="w-3.5 h-3.5" />
+                              <Icon name="security" size="xs" />
                             ) : eq.type === 'Router' ? (
-                              <Router className="w-3.5 h-3.5" />
+                              <Icon name="router" size="xs" />
                             ) : eq.type === 'Switch' ? (
-                              <Layers className="w-3.5 h-3.5" />
+                              <Icon name="layers" size="xs" />
                             ) : (
-                              <Server className="w-3.5 h-3.5" />
+                              <Icon name="dns" size="xs" />
                             )}
                           </span>
                           <span className="font-semibold text-[#dfe4e0] group-hover:text-[#78d8ba] transition-colors">
@@ -1050,13 +1053,13 @@ export const ParcPage: React.FC = () => {
                 }`}
               >
                 {selectedEq.type === 'Firewall' ? (
-                  <Shield className="w-5 h-5" />
+                  <Icon name="security" size="md" />
                 ) : selectedEq.type === 'Router' ? (
-                  <Router className="w-5 h-5" />
+                  <Icon name="router" size="md" />
                 ) : selectedEq.type === 'Switch' ? (
-                  <Layers className="w-5 h-5" />
+                  <Icon name="layers" size="md" />
                 ) : (
-                  <Server className="w-5 h-5" />
+                  <Icon name="dns" size="md" />
                 )}
               </div>
               <div>
@@ -1090,7 +1093,7 @@ export const ParcPage: React.FC = () => {
               onClick={() => setSelectedEq(null)}
               className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
             >
-              <X className="w-4 h-4" />
+              <Icon name="close" size="sm" />
             </button>
           </div>
 
@@ -1200,7 +1203,7 @@ export const ParcPage: React.FC = () => {
             {selectedEq.anomalies.length > 0 && (
               <div className="bg-[#1c211e] rounded border border-[#3e4945]/50 p-3">
                 <h4 className="text-[10px] font-bold text-[#ffb4ab] uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-[#ffb4ab]" />
+                  <Icon name="warning" size="xs" className="text-[#ffb4ab]" />
                   <span>ANOMALIES DE SÉCURITÉ</span>
                 </h4>
                 <div className="space-y-2">
@@ -1213,8 +1216,10 @@ export const ParcPage: React.FC = () => {
                           : 'bg-[#d37768]/10 border-[#d37768]/25'
                       }`}
                     >
-                      <Zap
-                        className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${
+                      <Icon
+                        name="bolt"
+                        size="xs"
+                        className={`mt-0.5 shrink-0 ${
                           anom.icon === 'bolt' ? 'text-[#ffb4ab]' : 'text-[#d37768]'
                         }`}
                       />
@@ -1236,7 +1241,7 @@ export const ParcPage: React.FC = () => {
               <div className="flex justify-between items-center py-1.5 border-b border-[#3e4945]/50 text-xs">
                 <span className="text-[#dfe4e0]">Dernière sauvegarde config</span>
                 <span className="flex items-center gap-1 text-[#78d8ba] text-[11px] font-mono">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <Icon name="check_circle" size="xs" />
                   {selectedEq.lastBackup}
                 </span>
               </div>
@@ -1248,9 +1253,9 @@ export const ParcPage: React.FC = () => {
                   }`}
                 >
                   {selectedEq.cisAudit.status === 'ok' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <Icon name="check_circle" size="xs" />
                   ) : (
-                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <Icon name="warning" size="xs" />
                   )}
                   {selectedEq.cisAudit.message}
                 </span>
@@ -1265,7 +1270,7 @@ export const ParcPage: React.FC = () => {
               onClick={() => setShowSshModal(true)}
               className="flex-1 bg-[#017094]/20 border border-[#017094] text-[#81d0f8] py-2 rounded text-xs font-semibold flex items-center justify-center gap-2 hover:bg-[#017094]/30 transition-colors shadow-sm"
             >
-              <Terminal className="w-3.5 h-3.5" />
+              <Icon name="terminal" size="xs" />
               <span>Terminal SSH</span>
             </button>
             <button
@@ -1275,7 +1280,7 @@ export const ParcPage: React.FC = () => {
               className="px-3 bg-[#ffb4ab]/10 border border-[#ffb4ab]/30 text-[#ffb4ab] py-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-[#ffb4ab]/20 transition-colors shadow-sm disabled:opacity-50"
               title="Supprimer cet équipement du parc"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Icon name="delete" size="xs" />
               <span>Supprimer</span>
             </button>
           </div>
@@ -1293,7 +1298,7 @@ export const ParcPage: React.FC = () => {
                 <span className="w-3 h-3 rounded-full bg-[#d37768]" />
                 <span className="w-3 h-3 rounded-full bg-[#3da186]" />
                 <span className="ml-2 text-xs font-mono text-[#dfe4e0] font-semibold flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5 text-[#78d8ba]" />
+                  <Icon name="terminal" size="xs" className="text-[#78d8ba]" />
                   <span>ssh admin@{selectedEq.ip} ({selectedEq.name})</span>
                 </span>
               </div>
@@ -1312,22 +1317,46 @@ export const ParcPage: React.FC = () => {
                   <span>{sshMode === 'REAL_SSH' ? 'Session SSH Paramiko Réelle' : sshMode === 'EMULATED_CLI' ? 'Moteur CLI Émulateur IOS & Linux' : 'Prêt (Auto-Détection)'}</span>
                 </span>
 
+                {/* 1. Bouton Vider la console (Clear) */}
+                <button
+                  onClick={() => {
+                    setSshHistory([`[Console réinitialisée] Connexion active sur ${selectedEq.ip}...`]);
+                    showToast('Buffer du terminal réinitialisé.');
+                  }}
+                  className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
+                  title="Effacer le buffer d'affichage"
+                >
+                  <Icon name="delete_sweep" size="xs" />
+                </button>
+
+                {/* 2. Bouton Exporter la session (.log) */}
+                <button
+                  onClick={handleExportSshLog}
+                  className="text-[#bdc9c3] hover:text-[#78d8ba] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
+                  title="Télécharger le journal d'audit de la session (.log)"
+                >
+                  <Icon name="download" size="xs" />
+                </button>
+
+                {/* 3. Bouton Copier le terminal */}
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(sshHistory.join('\n'));
                     showToast('Sortie console copiée dans le presse-papier');
                   }}
-                  className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
-                  title="Copier le terminal"
+                  className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
+                  title="Copier tout le terminal"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <Icon name="content_copy" size="xs" />
                 </button>
+
+                {/* 4. Bouton Fermer */}
                 <button
                   onClick={() => setShowSshModal(false)}
-                  className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
-                  title="Fermer le terminal"
+                  className="text-[#bdc9c3] hover:text-[#ffb4ab] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
+                  title="Fermer la session terminal"
                 >
-                  <X className="w-4 h-4" />
+                  <Icon name="close" size="sm" />
                 </button>
               </div>
             </div>
@@ -1335,7 +1364,7 @@ export const ParcPage: React.FC = () => {
             {/* Barre de commandes rapides (Actions en un clic) */}
             <div className="px-4 py-2 bg-[#121715] border-b border-[#3e4945]/70 flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono flex-shrink-0 scrollbar-none">
               <span className="text-[#87938e] text-[10px] uppercase font-bold mr-1 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-[#78d8ba]" />
+                <Icon name="auto_awesome" size="xs" className="text-[#78d8ba]" />
                 <span>Actions:</span>
               </span>
               {[
@@ -1383,7 +1412,7 @@ export const ParcPage: React.FC = () => {
               ))}
               {isSshExecuting && (
                 <div className="flex items-center gap-2 text-[#ffdd80] text-xs py-1">
-                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <Icon name="refresh" size="xs" className="animate-spin" />
                   <span>Exécution de la commande en cours...</span>
                 </div>
               )}
@@ -1418,9 +1447,9 @@ export const ParcPage: React.FC = () => {
                 className="px-3 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-mono text-xs font-bold flex items-center gap-1.5 hover:bg-[#78d8ba]/90 transition-colors disabled:opacity-40 cursor-pointer"
               >
                 {isSshExecuting ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <Icon name="refresh" size="xs" className="animate-spin" />
                 ) : (
-                  <Send className="w-3.5 h-3.5" />
+                  <Icon name="send" size="xs" />
                 )}
                 <span>Exécuter</span>
               </button>
@@ -1437,7 +1466,7 @@ export const ParcPage: React.FC = () => {
             <div className="px-5 py-3.5 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-[#78d8ba]/15 border border-[#78d8ba]/40 flex items-center justify-center text-[#78d8ba]">
-                  <Radio className="w-4 h-4 animate-pulse" />
+                  <Icon name="sensors" size="sm" className="animate-pulse" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-[#dfe4e0] flex items-center gap-2">
@@ -1453,7 +1482,7 @@ export const ParcPage: React.FC = () => {
                 onClick={() => setShowRealScanModal(false)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1.5 rounded-lg hover:bg-[#262b29] transition-colors"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -1463,7 +1492,7 @@ export const ParcPage: React.FC = () => {
                 <div className="flex flex-col">
                   <span className="text-[10px] uppercase font-bold text-[#87938e]">Machine Hôte</span>
                   <span className="font-semibold text-[#dfe4e0] flex items-center gap-1 font-mono">
-                    <Cpu className="w-3 h-3 text-[#78d8ba]" />
+                    <Icon name="memory" size="xs" className="text-[#78d8ba]" />
                     {realNetInfo?.hostname || 'Détection...'}
                   </span>
                 </div>
@@ -1498,7 +1527,7 @@ export const ParcPage: React.FC = () => {
                   disabled={isRealScanning}
                   className="px-3.5 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold text-xs flex items-center gap-1.5 hover:bg-[#78d8ba]/90 transition-all shadow-md cursor-pointer disabled:opacity-50"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRealScanning ? 'animate-spin' : ''}`} />
+                  <Icon name="refresh" size="xs" className={isRealScanning ? 'animate-spin' : ''} />
                   <span>{isRealScanning ? 'Scan en cours...' : 'Lancer le Balayage Réel'}</span>
                 </button>
               </div>
@@ -1508,7 +1537,7 @@ export const ParcPage: React.FC = () => {
             <div className="p-4 flex-1 overflow-y-auto space-y-2.5 min-h-[220px]">
               {isRealScanning ? (
                 <div className="h-48 flex flex-col items-center justify-center gap-3 text-center">
-                  <RefreshCw className="w-8 h-8 text-[#78d8ba] animate-spin" />
+                  <Icon name="refresh" size={32} className="text-[#78d8ba] animate-spin" />
                   <p className="text-xs text-[#dfe4e0] font-medium">
                     Balayage ping multithreadé et sondage des ports d'administration en cours...
                   </p>
@@ -1565,11 +1594,11 @@ export const ParcPage: React.FC = () => {
                             />
                             <div className="w-9 h-9 rounded-md bg-[#262b29] border border-[#3e4945] flex items-center justify-center text-[#78d8ba] flex-shrink-0">
                               {dev.type.toLowerCase().includes('routeur') || dev.type.toLowerCase().includes('box') ? (
-                                <Wifi className="w-5 h-5 text-[#81d0f8]" />
+                                <Icon name="wifi" size="md" className="text-[#81d0f8]" />
                               ) : dev.type.toLowerCase().includes('poste') ? (
-                                <Cpu className="w-5 h-5 text-[#78d8ba]" />
+                                <Icon name="memory" size="md" className="text-[#78d8ba]" />
                               ) : (
-                                <Server className="w-5 h-5 text-[#ffdd80]" />
+                                <Icon name="dns" size="md" className="text-[#ffdd80]" />
                               )}
                             </div>
                             <div className="min-w-0">
@@ -1628,7 +1657,7 @@ export const ParcPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="h-48 flex flex-col items-center justify-center gap-2 text-center text-xs text-[#bdc9c3]">
-                  <Radio className="w-8 h-8 text-[#78d8ba]/60" />
+                  <Icon name="sensors" size={32} className="text-[#78d8ba]/60" />
                   <p>Cliquez sur "Lancer le Balayage Réel" pour sonder votre réseau physique.</p>
                   <p className="text-[11px] text-[#87938e]">
                     La passerelle Box Internet ({realNetInfo?.gateway_ip || '192.168.0.1'}) et vos postes seront automatiquement identifiés.
@@ -1656,9 +1685,9 @@ export const ParcPage: React.FC = () => {
                   className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold text-xs flex items-center gap-1.5 hover:bg-[#78d8ba]/90 transition-all shadow-md cursor-pointer disabled:opacity-40"
                 >
                   {isImportingReal ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <Icon name="refresh" size="xs" className="animate-spin" />
                   ) : (
-                    <Plus className="w-3.5 h-3.5" />
+                    <Icon name="add" size="xs" />
                   )}
                   <span>Importer dans le Parc ({selectedRealIps.size})</span>
                 </button>
@@ -1676,14 +1705,14 @@ export const ParcPage: React.FC = () => {
             {/* Header modal */}
             <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#dfe4e0] flex items-center gap-2">
-                <Plus className="w-4 h-4 text-[#78d8ba]" />
+                <Icon name="add" size="sm" className="text-[#78d8ba]" />
                 <span>Ajouter un équipement au parc</span>
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -1777,7 +1806,7 @@ export const ParcPage: React.FC = () => {
                 >
                   {isAdding ? (
                     <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <Icon name="refresh" size="xs" className="animate-spin" />
                       <span>Enregistrement...</span>
                     </>
                   ) : (

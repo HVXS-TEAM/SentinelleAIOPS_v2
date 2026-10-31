@@ -1,17 +1,5 @@
 import React, { useState } from 'react';
-import {
-  LayoutDashboard,
-  Activity,
-  Shield,
-  Network,
-  Box,
-  Bot,
-  Settings,
-  LogOut,
-  HelpCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from 'lucide-react';
+import { Icon } from './ui/Icon';
 
 interface SidebarProps {
   currentTab: string;
@@ -24,14 +12,20 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
-const NAV_ITEMS = [
-  { id: 'dashboard',   label: 'DASHBOARD',         icon: LayoutDashboard },
-  { id: 'supervision', label: 'SUPERVISION',       icon: Activity        },
-  { id: 'securite',    label: 'SÉCURITÉ',          icon: Shield          },
-  { id: 'netdevops',   label: 'NETDEVOPS',         icon: Network         },
-  { id: 'parc',        label: 'PARC INFORMATIQUE', icon: Box             },
-  { id: 'assistant',   label: 'ASSISTANT IA',      icon: Bot             },
-  { id: 'admin',       label: 'ADMIN & RAPPORTS',  icon: Settings        },
+interface NavItem {
+  id: string;
+  label: string;
+  iconName: string;
+}
+
+const NAV_ITEMS: readonly NavItem[] = [
+  { id: 'dashboard',   label: 'DASHBOARD',         iconName: 'dashboard' },
+  { id: 'supervision', label: 'SUPERVISION',       iconName: 'monitoring' },
+  { id: 'securite',    label: 'SÉCURITÉ',          iconName: 'security' },
+  { id: 'netdevops',   label: 'NETDEVOPS',         iconName: 'lan' },
+  { id: 'parc',        label: 'PARC INFORMATIQUE', iconName: 'inventory_2' },
+  { id: 'assistant',   label: 'ASSISTANT IA',      iconName: 'smart_toy' },
+  { id: 'admin',       label: 'ADMIN & RAPPORTS',  iconName: 'settings' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -115,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             isCollapsed ? 'hidden' : 'block'
           }`}
         >
-          <PanelLeftClose className="w-4 h-4" />
+          <Icon name="menu_open" size="sm" />
         </button>
       </div>
 
@@ -127,14 +121,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title="Déplier la barre de navigation"
             className="w-8 h-8 rounded-lg bg-[#14191c] hover:bg-[#1f262b] border border-[#272a2d] hover:border-[#78d8ba]/40 flex items-center justify-center text-[#87938e] hover:text-[#78d8ba] transition-all"
           >
-            <PanelLeftOpen className="w-4 h-4" />
+            <Icon name="menu" size="sm" />
           </button>
         </div>
       )}
 
       {/* ── Navigation ──────────────────────────────────────────────────────── */}
       <nav className="flex-1 py-3 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+        {NAV_ITEMS.map(({ id, label, iconName }) => {
           const active = currentTab === id;
           return (
             <button
@@ -153,9 +147,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }`}
             >
               <Icon
-                className={`shrink-0 transition-transform ${
-                  isCollapsed ? 'w-5 h-5' : 'w-4 h-4'
-                } ${active ? 'text-[#78d8ba]' : 'text-[#87938e]'}`}
+                name={iconName}
+                size={isCollapsed ? 20 : 18}
+                fill={active}
+                className={`shrink-0 transition-transform ${active ? 'text-[#78d8ba]' : 'text-[#87938e]'}`}
               />
               {!isCollapsed && <span className="truncate">{label}</span>}
             </button>
@@ -172,14 +167,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => alert('Documentation en ligne Sentinelle AIOps v2.')}
                 className="flex items-center gap-1.5 hover:text-[#e0e3e6] transition-colors font-mono text-[11px]"
               >
-                <HelpCircle className="w-3.5 h-3.5" />
+                <Icon name="help" size="xs" />
                 Aide
               </button>
               <button
                 onClick={onLogout}
                 className="flex items-center gap-1.5 text-error hover:text-error/80 transition-colors font-mono text-[11px]"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <Icon name="logout" size="xs" />
                 Quitter
               </button>
             </div>
@@ -214,7 +209,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               title="Quitter la session"
               className="w-9 h-9 rounded-lg bg-[#191c1e] hover:bg-error/20 border border-[#272a2d] hover:border-error/40 flex items-center justify-center text-error hover:text-error/90 transition-colors"
             >
-              <LogOut className="w-4 h-4" />
+              <Icon name="logout" size="sm" />
             </button>
           </div>
         )}

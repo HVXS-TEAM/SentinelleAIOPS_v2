@@ -89,7 +89,7 @@ function MainApp() {
       case 'securite':    return <SecuritePage />;
       case 'netdevops':   return <NetDevOpsPage />;
       case 'parc':        return <ParcPage />;
-      case 'assistant':   return <AssistantPage currentUser={currentUser} />;
+      case 'assistant':   return <AssistantPage currentUser={currentUser} onNavigateTab={setCurrentTab} />;
       case 'admin':       return <AdminPage />;
       case 'rapports':    return <AdminPage />;
       default:            return <DashboardPage onNavigateTab={setCurrentTab} />;

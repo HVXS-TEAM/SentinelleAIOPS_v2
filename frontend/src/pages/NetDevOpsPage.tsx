@@ -1,18 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Router,
-  Shield,
-  Clock,
-  RotateCcw,
-  X,
-  CheckCircle2,
-  AlertTriangle,
-  Terminal,
-  Cpu,
-  Layers,
-  Copy,
-  RefreshCw,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { netdevopsService } from '../services/api';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -100,6 +87,30 @@ export const NetDevOpsPage: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
+  const [findingSearchQuery, setFindingSearchQuery] = useState('');
+
+  /* Détection et injection automatique d'un script transféré depuis l'Assistant IA */
+  useEffect(() => {
+    const prefillCode = sessionStorage.getItem('netdevops:prefill_code');
+    if (prefillCode) {
+      sessionStorage.removeItem('netdevops:prefill_code');
+      setSelectedFinding(prev => ({
+        ...prev,
+        suggestedConfigSnippet: prefillCode,
+        title: 'Script Correctif Personnalisé (Transféré depuis Assistant IA)',
+        description: 'Commandes générées par Sentinelle Neural Core validées pour déploiement Netmiko.',
+      }));
+      setShowApplyDrawer(true);
+      showToast('Script Cisco IOS chargé avec succès depuis l\'Assistant IA.');
+    }
+  }, []);
+
+  const filteredFindings = findingsList.filter(f => {
+    if (!findingSearchQuery.trim()) return true;
+    const q = findingSearchQuery.toLowerCase();
+    return f.title.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
+  });
+
   const loadDeviceAudit = useCallback(async (devId: string) => {
     try {
       const [auditRes, backupsRes] = await Promise.all([
@@ -118,7 +129,9 @@ export const NetDevOpsPage: React.FC = () => {
             suggestedConfigSnippet: v.remediation || 'service password-encryption\nline vty 0 4\n transport input ssh\n exec-timeout 10 0',
           }));
           setFindingsList(mappedFindings);
-          setSelectedFinding(mappedFindings[0]);
+          setSelectedFinding(prev =>
+            prev.title.includes('Assistant IA') ? prev : mappedFindings[0]
+          );
         } else {
           setFindingsList([]);
         }
@@ -198,7 +211,7 @@ export const NetDevOpsPage: React.FC = () => {
       {/* ── Toast de feedback ─────────────────────────────────────────────── */}
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1d2022] border border-[#78d8ba] text-[#78d8ba] px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+          <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
           {toastMsg}
         </div>
       )}
@@ -244,11 +257,11 @@ export const NetDevOpsPage: React.FC = () => {
                     <div className="flex items-center gap-3">
                       <div className="p-2 rounded-lg bg-[#1d2022] text-[#78d8ba]">
                         {d.type === 'Switch' ? (
-                          <Layers className="w-4 h-4 text-[#78d8ba]" />
+                          <Icon name="layers" size="sm" className="text-[#78d8ba]" />
                         ) : d.type === 'Router' ? (
-                          <Router className="w-4 h-4 text-orange-400" />
+                          <Icon name="router" size="sm" className="text-orange-400" />
                         ) : (
-                          <Shield className="w-4 h-4 text-[#78d8ba]" />
+                          <Icon name="security" size="sm" className="text-[#78d8ba]" />
                         )}
                       </div>
                       <div>
@@ -289,7 +302,7 @@ export const NetDevOpsPage: React.FC = () => {
           {/* Bloc 2 : Historique de sauvegarde */}
           <div className="bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5">
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-4">
-              <Clock className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="schedule" size="sm" className="text-[#78d8ba]" />
               Historique de sauvegarde
             </div>
 
@@ -315,7 +328,7 @@ export const NetDevOpsPage: React.FC = () => {
                     }}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1d2022] border border-[#3e4945] hover:border-[#78d8ba] text-[#78d8ba] text-xs transition-colors"
                   >
-                    <RotateCcw className="w-3 h-3" />
+                    <Icon name="restore" size="xs" />
                     Restore
                   </button>
                 </div>
@@ -347,18 +360,18 @@ export const NetDevOpsPage: React.FC = () => {
                   disabled={isAuditing}
                   className="px-3 py-1.5 rounded-lg border border-[#78d8ba] text-[#78d8ba] hover:bg-[#78d8ba]/10 text-xs font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isAuditing ? 'animate-spin' : ''}`} />
+                  <Icon name="refresh" size="xs" className={isAuditing ? 'animate-spin' : ''} />
                   <span>{isAuditing ? 'Audit en cours...' : 'Lancer Audit CIS'}</span>
                 </button>
 
                 {selectedDevice.compliant ? (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#78d8ba]/15 border border-[#78d8ba]/40 text-xs font-mono font-bold text-[#78d8ba]">
-                    <CheckCircle2 className="w-4 h-4" />
+                    <Icon name="check_circle" size="sm" />
                     100% Compliant
                   </div>
                 ) : (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#ffb4ab]/15 border border-[#ffb4ab]/40 text-xs font-mono font-bold text-[#ffb4ab]">
-                    <AlertTriangle className="w-4 h-4" />
+                    <Icon name="warning" size="sm" />
                     {findingsList.length} Findings
                   </div>
                 )}
@@ -367,36 +380,62 @@ export const NetDevOpsPage: React.FC = () => {
 
             {/* Zone centrale : Findings CIS à gauche + Diff IA à droite */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-5">
-              {/* Findings CIS (5 cols) */}
+              {/* Findings CIS avec Recherche Rapide (5 cols) */}
               <div className="lg:col-span-5 space-y-3 font-mono">
-                {findingsList.map(f => {
-                  const isSel = selectedFinding.id === f.id;
-                  return (
-                    <div
-                      key={f.id}
-                      onClick={() => setSelectedFinding(f)}
-                      className={`p-3.5 rounded-lg border transition-all cursor-pointer ${
-                        isSel
-                          ? 'bg-[#161c22] border-l-4 border-l-[#ffb4ab] border-y-[#272a2d] border-r-[#272a2d] shadow-sm'
-                          : 'bg-[#161c22] border border-[#272a2d] hover:border-[#3e4945]'
-                      }`}
-                    >
-                      <div className="text-xs font-bold text-[#e0e3e6] mb-1">
-                        {f.title}
+                {/* Barre de recherche instantanée */}
+                <div className="relative mb-2">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#87938e] pointer-events-none">
+                    <Icon name="search" size="xs" />
+                  </span>
+                  <input
+                    type="text"
+                    value={findingSearchQuery}
+                    onChange={e => setFindingSearchQuery(e.target.value)}
+                    placeholder="Filtrer les anomalies CIS (ex: password, ssh, vty)..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[#101416] border border-[#272a2d] text-xs text-[#e0e3e6] placeholder-[#87938e] focus:outline-none focus:border-[#78d8ba] transition-colors"
+                  />
+                </div>
+
+                {/* Liste filtrée des anomalies */}
+                {filteredFindings.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-[#87938e] font-sans bg-[#161c22] rounded-lg border border-[#272a2d]">
+                    Aucune anomalie ne correspond à votre filtre.
+                  </div>
+                ) : (
+                  filteredFindings.map(f => {
+                    const isSel = selectedFinding.id === f.id;
+                    return (
+                      <div
+                        key={f.id}
+                        onClick={() => setSelectedFinding(f)}
+                        className={`p-3.5 rounded-lg border transition-all cursor-pointer ${
+                          isSel
+                            ? 'bg-[#161c22] border-l-4 border-l-[#ffb4ab] border-y-[#272a2d] border-r-[#272a2d] shadow-sm'
+                            : 'bg-[#161c22] border border-[#272a2d] hover:border-[#3e4945]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-xs font-bold text-[#e0e3e6]">
+                            {f.title}
+                          </div>
+                          <span className="text-[10px] text-[#ffb4ab] bg-[#ffb4ab]/10 px-1.5 py-0.5 rounded border border-[#ffb4ab]/20 font-bold">
+                            CIS
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#87938e] leading-relaxed">
+                          {f.description}
+                        </div>
                       </div>
-                      <div className="text-[11px] text-[#87938e] leading-relaxed">
-                        {f.description}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {/* Suggestions d'automatisation IA & Diff côte à côte (7 cols) */}
               <div className="lg:col-span-7 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-3">
-                    <Cpu className="w-4 h-4 text-[#78d8ba]" />
+                    <Icon name="memory" size="sm" className="text-[#78d8ba]" />
                     Suggestions d'automatisation IA
                   </div>
 
@@ -434,7 +473,7 @@ export const NetDevOpsPage: React.FC = () => {
               onClick={() => showToast('Suggestion IA rejetée. Journalisé dans l\'audit trail.')}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#3e4945] bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#e0e3e6] transition-colors"
             >
-              <X className="w-4 h-4" />
+              <Icon name="close" size="sm" />
               Reject
             </button>
             <button
@@ -442,7 +481,7 @@ export const NetDevOpsPage: React.FC = () => {
               onClick={() => setShowApplyDrawer(true)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm"
             >
-              <CheckCircle2 className="w-4 h-4" />
+              <Icon name="check_circle" size="sm" />
               Approve &amp; Apply
             </button>
           </div>
@@ -456,7 +495,7 @@ export const NetDevOpsPage: React.FC = () => {
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-[#272a2d]">
                 <div className="flex items-center gap-2">
-                  <Terminal className="w-5 h-5 text-[#78d8ba]" />
+                  <Icon name="terminal" size="md" className="text-[#78d8ba]" />
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
                     Déploiement Netmiko (Cisco IOS)
                   </h3>
@@ -465,7 +504,7 @@ export const NetDevOpsPage: React.FC = () => {
                   onClick={() => setShowApplyDrawer(false)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 
@@ -502,7 +541,7 @@ write memory`}
                     }}
                     className="w-full py-2 rounded-lg border border-[#3e4945] hover:border-[#78d8ba] text-xs font-mono text-[#dfe4e0] hover:text-[#78d8ba] flex items-center justify-center gap-1.5 transition-colors cursor-pointer mt-2"
                   >
-                    <Copy className="w-3.5 h-3.5" />
+                    <Icon name="content_copy" size="xs" />
                     <span>Copier les commandes CLI</span>
                   </button>
                 </div>
@@ -523,7 +562,7 @@ write memory`}
                   <>Exécution Netmiko en cours...</>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
+                    <Icon name="check_circle" size="sm" />
                     Exécuter sur l'équipement
                   </>
                 )}
@@ -546,7 +585,7 @@ write memory`}
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-[#272a2d]">
                 <div className="flex items-center gap-2">
-                  <RotateCcw className="w-5 h-5 text-orange-400" />
+                  <Icon name="restore" size="md" className="text-orange-400" />
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
                     Restauration Sauvegarde
                   </h3>
@@ -555,7 +594,7 @@ write memory`}
                   onClick={() => setShowRestoreDrawer(false)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 

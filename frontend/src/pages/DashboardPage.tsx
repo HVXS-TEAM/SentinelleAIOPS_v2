@@ -1,17 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Calendar,
-  Plus,
-  TrendingUp,
-  AlertTriangle,
-  Filter,
-  X,
-  Terminal,
-  Activity,
-  CheckCircle2,
-  ExternalLink,
-  ShieldCheck,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import {
   ResponsiveContainer,
   LineChart,
@@ -275,7 +263,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
       {/* ── Toast de feedback dynamique ───────────────────────────────────── */}
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1d2022] border border-[#78d8ba] text-[#78d8ba] px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+          <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
           {toastMsg}
         </div>
       )}
@@ -296,7 +284,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             onClick={handlePeriodToggle}
             className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[#3e4945] bg-[#1d2022] text-xs font-mono text-[#e0e3e6] hover:bg-[#272a2d] transition-colors"
           >
-            <Calendar className="w-3.5 h-3.5 text-[#87938e]" />
+            <Icon name="calendar_today" size="xs" className="text-[#87938e]" />
             {period}
           </button>
           <button
@@ -304,7 +292,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             onClick={() => setShowActionDrawer(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm"
           >
-            <Plus className="w-4 h-4" />
+            <Icon name="add" size="sm" />
             ACTION
           </button>
         </div>
@@ -324,7 +312,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             {monitoredCount.toLocaleString('fr-FR')}
           </div>
           <div className="text-xs font-mono text-[#78d8ba] mt-2 flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5" /> +2.4%
+            <Icon name="trending_up" size="xs" /> +2.4%
           </div>
         </div>
 
@@ -334,7 +322,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
           className="bg-[#1d2022] border border-[#ef4444]/60 hover:border-[#ef4444] rounded-xl p-4 cursor-pointer transition-colors flex flex-col justify-between"
         >
           <span className="text-[10px] font-mono tracking-widest text-[#ef4444] uppercase flex items-center gap-1.5 font-semibold">
-            <AlertTriangle className="w-3.5 h-3.5 text-[#ef4444]" />
+            <Icon name="warning" size="xs" className="text-[#ef4444]" />
             ALERTES CRITIQUES
           </span>
           <div className="text-3xl font-bold font-mono text-[#ffb4ab] mt-2">
@@ -398,7 +386,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             {cisCompliance}%
           </div>
           <div className="text-xs font-mono text-[#78d8ba] mt-2 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Benchmark CIS
+            <Icon name="check_circle" size="xs" /> Benchmark CIS
           </div>
         </div>
       </div>
@@ -575,7 +563,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                 <h2 className="text-xs font-mono font-semibold tracking-wider text-[#e0e3e6] uppercase">
                   FLUX D'ALERTES ACTIVES
                 </h2>
-                <Filter className="w-4 h-4 text-[#87938e] cursor-pointer hover:text-[#e0e3e6]" />
+                <Icon name="filter_list" size="sm" className="text-[#87938e] cursor-pointer hover:text-[#e0e3e6]" />
               </div>
 
               <div className="space-y-3">
@@ -609,7 +597,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                         </p>
                         <div className="mt-2.5">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#1d2022] border border-[#272a2d] text-[10px] font-mono text-[#bdc9c3]">
-                            <Activity className="w-3 h-3 text-[#78d8ba]" /> {al.module_origine}
+                            <Icon name="monitoring" size="xs" className="text-[#78d8ba]" /> {al.module_origine}
                           </span>
                         </div>
                       </div>
@@ -617,7 +605,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   })
                 ) : (
                   <div className="bg-[#161c22] border border-[#272a2d] rounded-lg p-5 text-center flex flex-col items-center justify-center">
-                    <ShieldCheck className="w-8 h-8 text-[#78d8ba] mb-2" />
+                    <Icon name="verified_user" size={32} className="text-[#78d8ba] mb-2" />
                     <span className="text-xs font-mono font-semibold text-[#e0e3e6]">
                       Aucune alerte active
                     </span>
@@ -710,7 +698,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   onClick={() => setSelectedEquipment(null)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 
@@ -777,7 +765,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                 }}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#78d8ba] text-[#00382b] font-mono font-bold text-xs hover:bg-[#68c8aa] transition-colors"
               >
-                <Terminal className="w-4 h-4" />
+                <Icon name="terminal" size="sm" />
                 Session SSH (Parc)
               </button>
               <button
@@ -804,7 +792,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   onClick={() => setShowActionDrawer(false)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 
@@ -822,7 +810,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                       Découverte SNMP et audit de santé complet
                     </div>
                   </div>
-                  <ExternalLink className="w-4 h-4 text-[#87938e] group-hover:text-[#78d8ba]" />
+                  <Icon name="open_in_new" size="sm" className="text-[#87938e] group-hover:text-[#78d8ba]" />
                 </button>
 
                 <button
@@ -838,7 +826,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                       Exécution de la régression linéaire sur 7 jours
                     </div>
                   </div>
-                  <ExternalLink className="w-4 h-4 text-[#87938e] group-hover:text-[#78d8ba]" />
+                  <Icon name="open_in_new" size="sm" className="text-[#87938e] group-hover:text-[#78d8ba]" />
                 </button>
 
                 <button
@@ -854,7 +842,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                       Téléchargement immédiat du parc horodaté
                     </div>
                   </div>
-                  <ExternalLink className="w-4 h-4 text-[#87938e] group-hover:text-[#78d8ba]" />
+                  <Icon name="open_in_new" size="sm" className="text-[#87938e] group-hover:text-[#78d8ba]" />
                 </button>
               </div>
             </div>

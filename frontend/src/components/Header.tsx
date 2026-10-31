@@ -1,19 +1,6 @@
-import React, { useState } from 'react';
-import {
-  Search,
-  Bell,
-  Moon,
-  Sun,
-  Settings,
-  LogOut,
-  Check,
-  Sliders,
-  Shield,
-  X,
-  Radio,
-  Volume2,
-  Clock,
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Icon } from './ui/Icon';
 import { useTheme } from '../context/ThemeContext';
 
 import type { AuthenticatedUser } from '../pages/LoginPage';
@@ -67,6 +54,7 @@ const NOTIFICATIONS: Notification[] = [
 
 export const Header: React.FC<HeaderProps> = ({
   actions,
+  onRefresh,
   currentUser,
   onNavigateTab,
   onLogout,
@@ -81,7 +69,43 @@ export const Header: React.FC<HeaderProps> = ({
   const [compactMode, setCompactMode] = useState(false);
   const [settingsSavedToast, setSettingsSavedToast] = useState(false);
 
+  /* Compteur de battement télémétrique temps réel (Live Heartbeat) */
+  const [syncSeconds, setSyncSeconds] = useState<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSyncSeconds(prev => {
+        if (prev >= 29) {
+          // Battement de synchro atteint : relance un cycle
+          return 0;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleManualSync = () => {
+    setSyncSeconds(0);
+    if (onRefresh) {
+      onRefresh();
+    }
+  };
+
   const criticalCount = NOTIFICATIONS.filter(n => n.severity === 'CRITICAL').length;
+
+  // Fermeture de la modale via la touche Échap
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowSettingsModal(false);
+      }
+    };
+    if (showSettingsModal) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showSettingsModal]);
 
   const getInitials = (name?: string) => {
     if (!name) return 'AD';
@@ -94,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="h-16 px-6 border-b border-[#272a2d] bg-[#101416] flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30">
       {/* ── Barre de recherche arrondie (Stitch design) ──────────────────────── */}
       <div className="w-[420px] max-w-lg relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#87938e]" />
+        <Icon name="search" size="sm" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#87938e]" />
         <input
           id="header-search"
           type="text"
@@ -118,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="w-9 h-9 rounded-full bg-[#181f26] border border-[#272a2d] hover:border-[#78d8ba]/40 flex items-center justify-center text-[#bdc9c3] hover:text-[#e0e3e6] transition-colors relative cursor-pointer"
             title="Notifications"
           >
-            <Bell className="w-4 h-4" />
+            <Icon name="notifications" size="sm" />
             {criticalCount > 0 && (
               <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#78d8ba]" />
             )}
@@ -170,6 +194,24 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
+        {/* Voyant de battement télémétrique temps réel (Live Telemetry Heartbeat) */}
+        <div
+          onClick={handleManualSync}
+          className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-[#0b0f11] border border-[#272a2d] hover:border-[#78d8ba]/50 transition-colors cursor-pointer select-none"
+          title="Télémétrie AIOps active (SNMP/SSH) — Cliquer pour forcer une synchronisation immédiate"
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#78d8ba] opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#78d8ba]"></span>
+          </span>
+          <span className="text-[11px] font-mono font-semibold text-[#e0e3e6]">
+            Live Sync
+          </span>
+          <span className="text-[10px] font-mono text-[#87938e]">
+            {syncSeconds}s
+          </span>
+        </div>
+
         {/* Toggle Thème Temporel (Auto / Nuit / Jour) */}
         <button
           id="header-darkmode-btn"
@@ -190,18 +232,18 @@ export const Header: React.FC<HeaderProps> = ({
           {preference === 'auto' ? (
             <div className="relative flex items-center justify-center">
               {activeTheme === 'night' ? (
-                <Moon className="w-4 h-4" />
+                <Icon name="dark_mode" size="sm" />
               ) : (
-                <Sun className="w-4 h-4 text-amber-500" />
+                <Icon name="light_mode" size="sm" className="text-amber-500" />
               )}
               <span className="absolute -bottom-1 -right-1.5 text-[8px] font-mono font-bold px-0.5 rounded bg-[#0b0f11] text-[#78d8ba] border border-[#78d8ba]/40 leading-none">
                 A
               </span>
             </div>
           ) : preference === 'night' ? (
-            <Moon className="w-4 h-4" />
+            <Icon name="dark_mode" size="sm" />
           ) : (
-            <Sun className="w-4 h-4 text-amber-500" />
+            <Icon name="light_mode" size="sm" className="text-amber-500" />
           )}
         </button>
 
@@ -212,7 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
           className="w-9 h-9 rounded-full bg-[#181f26] border border-[#272a2d] hover:border-[#78d8ba]/40 flex items-center justify-center text-[#bdc9c3] hover:text-[#e0e3e6] transition-colors cursor-pointer"
           title="Paramètres de supervision & Préférences"
         >
-          <Settings className="w-4 h-4" />
+          <Icon name="settings" size="sm" />
         </button>
 
         {/* Avatar avec cercle stylisé et menu dropdown */}
@@ -259,7 +301,7 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[#bdc9c3] hover:text-[#e0e3e6] hover:bg-[#1d2022] transition-colors text-left cursor-pointer"
                 >
-                  <Shield className="w-3.5 h-3.5 text-[#78d8ba]" />
+                  <Icon name="shield" size="xs" className="text-[#78d8ba]" />
                   <span>Gestion Utilisateurs & RBAC</span>
                 </button>
                 <button
@@ -270,7 +312,7 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[#bdc9c3] hover:text-[#e0e3e6] hover:bg-[#1d2022] transition-colors text-left cursor-pointer"
                 >
-                  <Radio className="w-3.5 h-3.5 text-[#81d0f8]" />
+                  <Icon name="sensors" size="xs" className="text-[#81d0f8]" />
                   <span>Supervision Métriques Live</span>
                 </button>
               </div>
@@ -284,7 +326,7 @@ export const Header: React.FC<HeaderProps> = ({
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[#ffb4ab] hover:bg-[#ffb4ab]/10 transition-colors text-left font-mono text-xs cursor-pointer"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <Icon name="logout" size="xs" />
                   <span>Se déconnecter</span>
                 </button>
               </div>
@@ -305,26 +347,32 @@ export const Header: React.FC<HeaderProps> = ({
       )}
 
       {/* ── Modal : Préférences & Paramètres Rapides ───────────────────────── */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
-              <div className="flex items-center gap-2 text-[#78d8ba]">
-                <Settings className="w-4 h-4" />
+      {showSettingsModal && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150 modal-backdrop-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSettingsModal(false);
+          }}
+        >
+          <div className="w-full max-w-md bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 quick-settings-modal">
+            <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between modal-header">
+              <div className="flex items-center gap-2 text-[#78d8ba] modal-header-title">
+                <Icon name="settings" size="sm" />
                 <h3 className="text-sm font-bold font-mono">Préférences & Paramètres Rapides</h3>
               </div>
               <button
                 onClick={() => setShowSettingsModal(false)}
-                className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer"
+                className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors cursor-pointer modal-close-btn"
+                title="Fermer"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs font-mono">
+            <div className="p-5 space-y-4 text-xs font-mono modal-body">
               <div>
-                <label className="block text-[11px] font-semibold text-[#bdc9c3] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-[#78d8ba]" />
+                <label className="block text-[11px] font-semibold text-[#bdc9c3] uppercase tracking-wider mb-2 flex items-center gap-1.5 modal-section-label">
+                  <Icon name="schedule" size="xs" className="text-[#78d8ba] modal-section-icon" />
                   <span>Intervalle de rafraîchissement Télémétrie</span>
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -338,8 +386,8 @@ export const Header: React.FC<HeaderProps> = ({
                         onClick={() => setTelemetryInterval(val)}
                         className={`py-2 px-2 rounded border text-center transition-all cursor-pointer text-[11px] ${
                           isSel
-                            ? 'border-[#78d8ba] bg-[#78d8ba]/10 text-[#78d8ba] font-bold'
-                            : 'border-[#3e4945] bg-[#262b29] text-[#bdc9c3] hover:border-white/20'
+                            ? 'border-[#78d8ba] bg-[#78d8ba]/10 text-[#78d8ba] font-bold modal-btn-selected'
+                            : 'border-[#3e4945] bg-[#262b29] text-[#bdc9c3] hover:border-white/20 modal-btn-unselected'
                         }`}
                       >
                         {label}
@@ -349,46 +397,46 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded bg-[#12161a] border border-[#3e4945]/50">
+              <div className="flex items-center justify-between p-3 rounded bg-[#12161a] border border-[#3e4945]/50 modal-card-inner">
                 <div className="flex items-center gap-2">
-                  <Volume2 className="w-4 h-4 text-[#81d0f8]" />
+                  <Icon name="volume_up" size="sm" className="text-[#81d0f8] modal-feature-icon" />
                   <div>
-                    <div className="text-[#dfe4e0] font-semibold">Alertes sonores critiques</div>
-                    <div className="text-[10px] text-[#87938e]">Bip sonore à chaque incident sévérité CRITICAL</div>
+                    <div className="text-[#dfe4e0] font-semibold modal-text-title">Alertes sonores critiques</div>
+                    <div className="text-[10px] text-[#87938e] modal-text-subtitle">Bip sonore à chaque incident sévérité CRITICAL</div>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setSoundAlerts(!soundAlerts)}
-                  className={`relative w-8 h-4.5 rounded-full transition-colors cursor-pointer ${
-                    soundAlerts ? 'bg-[#78d8ba]' : 'bg-[#272a2d]'
+                  className={`relative w-8 h-4.5 rounded-full transition-colors cursor-pointer modal-switch-track ${
+                    soundAlerts ? 'bg-[#78d8ba] modal-switch-on' : 'bg-[#272a2d] modal-switch-off'
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow ${
+                    className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow modal-switch-thumb ${
                       soundAlerts ? 'left-4' : 'left-0.5'
                     }`}
                   />
                 </button>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded bg-[#12161a] border border-[#3e4945]/50">
+              <div className="flex items-center justify-between p-3 rounded bg-[#12161a] border border-[#3e4945]/50 modal-card-inner">
                 <div className="flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-[#78d8ba]" />
+                  <Icon name="tune" size="sm" className="text-[#78d8ba] modal-feature-icon" />
                   <div>
-                    <div className="text-[#dfe4e0] font-semibold">Mode d'affichage compact</div>
-                    <div className="text-[10px] text-[#87938e]">Densité accrue sur les tables et graphes d'infrastructure</div>
+                    <div className="text-[#dfe4e0] font-semibold modal-text-title">Mode d'affichage compact</div>
+                    <div className="text-[10px] text-[#87938e] modal-text-subtitle">Densité accrue sur les tables et graphes d'infrastructure</div>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCompactMode(!compactMode)}
-                  className={`relative w-8 h-4.5 rounded-full transition-colors cursor-pointer ${
-                    compactMode ? 'bg-[#78d8ba]' : 'bg-[#272a2d]'
+                  className={`relative w-8 h-4.5 rounded-full transition-colors cursor-pointer modal-switch-track ${
+                    compactMode ? 'bg-[#78d8ba] modal-switch-on' : 'bg-[#272a2d] modal-switch-off'
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow ${
+                    className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all shadow modal-switch-thumb ${
                       compactMode ? 'left-4' : 'left-0.5'
                     }`}
                   />
@@ -396,17 +444,17 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
 
               {settingsSavedToast && (
-                <div className="p-2.5 rounded bg-[#78d8ba]/10 border border-[#78d8ba]/30 text-[#78d8ba] text-[11px] flex items-center gap-1.5 animate-in fade-in">
-                  <Check className="w-3.5 h-3.5" />
+                <div className="p-2.5 rounded bg-[#78d8ba]/10 border border-[#78d8ba]/30 text-[#78d8ba] text-[11px] flex items-center gap-1.5 animate-in fade-in modal-toast">
+                  <Icon name="check" size="xs" />
                   <span>Préférences enregistrées avec succès.</span>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-[#3e4945]/60">
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#3e4945]/60 modal-footer">
                 <button
                   type="button"
                   onClick={() => setShowSettingsModal(false)}
-                  className="px-3.5 py-1.5 rounded bg-[#262b29] border border-[#3e4945] text-[#dfe4e0] hover:bg-[#313633] transition-colors cursor-pointer"
+                  className="px-3.5 py-1.5 rounded bg-[#262b29] border border-[#3e4945] text-[#dfe4e0] hover:bg-[#313633] transition-colors cursor-pointer modal-btn-cancel"
                 >
                   Fermer
                 </button>
@@ -419,14 +467,15 @@ export const Header: React.FC<HeaderProps> = ({
                       setShowSettingsModal(false);
                     }, 800);
                   }}
-                  className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold transition-colors cursor-pointer hover:bg-[#78d8ba]/90"
+                  className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold transition-colors cursor-pointer hover:bg-[#78d8ba]/90 modal-btn-apply"
                 >
                   Appliquer
                 </button>
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </header>
   );

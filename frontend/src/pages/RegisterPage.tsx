@@ -1,19 +1,5 @@
 import React, { useState } from 'react';
-import {
-  User,
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  Shield,
-  Wrench,
-  BarChart3,
-  UserPlus,
-  LogIn,
-  CheckCircle2,
-  AlertCircle,
-  Sparkles,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { authService } from '../services/api';
 import type { AuthenticatedUser } from './LoginPage';
 
@@ -28,7 +14,7 @@ interface RoleOption {
   id: UserRole;
   title: string;
   subtitle: string;
-  icon: React.ComponentType<{ className?: string }>;
+  iconName: string;
   badge: string;
 }
 
@@ -37,21 +23,21 @@ const ROLE_OPTIONS: RoleOption[] = [
     id: 'Administrateur',
     title: 'Administrateur',
     subtitle: 'Accès complet, PRA & gestion des comptes',
-    icon: Shield,
+    iconName: 'shield',
     badge: 'Contrôle Total',
   },
   {
     id: 'Technicien',
     title: 'Technicien N2/N3',
     subtitle: 'Supervision live, scans SNMP & audits CIS',
-    icon: Wrench,
+    iconName: 'build',
     badge: 'Opérationnel',
   },
   {
     id: 'Visiteur',
     title: 'Visiteur',
     subtitle: 'Consultation lecture seule & indicateurs',
-    icon: BarChart3,
+    iconName: 'monitoring',
     badge: 'Lecture seule',
   },
 ];
@@ -70,6 +56,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Évaluation de la robustesse du mot de passe
   const getPasswordStrength = (pwd: string) => {
@@ -93,34 +80,42 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const errors: Record<string, string> = {};
     const trimmedId = identifiant.trim();
     const trimmedNom = nomComplet.trim();
     const trimmedEmail = email.trim();
 
-    if (!trimmedId || trimmedId.length < 3) {
-      setErrorMsg("L'identifiant doit comporter au moins 3 caractères.");
-      return;
-    }
-
     if (!trimmedNom) {
-      setErrorMsg('Veuillez renseigner votre nom complet.');
-      return;
+      errors.nomComplet = 'Le nom complet est obligatoire.';
     }
 
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setErrorMsg('Veuillez renseigner une adresse email valide.');
-      return;
+    if (!trimmedId) {
+      errors.identifiant = "L'identifiant unique est requis.";
+    } else if (trimmedId.length < 3) {
+      errors.identifiant = "L'identifiant doit comporter au moins 3 caractères.";
     }
 
-    if (motDePasse.length < 6) {
-      setErrorMsg('Le mot de passe doit contenir au moins 6 caractères.');
-      return;
+    if (!trimmedEmail) {
+      errors.email = "L'adresse email est requise.";
+    } else if (!trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      errors.email = 'Veuillez renseigner une adresse email valide.';
+    }
+
+    if (!motDePasse) {
+      errors.motDePasse = 'Le mot de passe ne peut pas être vide.';
+    } else if (motDePasse.length < 6) {
+      errors.motDePasse = 'Le mot de passe doit comporter au moins 6 caractères.';
     }
 
     if (motDePasse !== confirmationPasse) {
-      setErrorMsg('Les deux mots de passe ne correspondent pas.');
+      errors.confirmationPasse = 'Les deux mots de passe ne correspondent pas.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
+    setFieldErrors({});
 
     setIsLoading(true);
 
@@ -190,7 +185,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
         {/* Titre & Sous-titre */}
         <div className="text-center mb-5 w-full">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#00f2c3]/10 border border-[#00f2c3]/30 text-[#00f2c3] text-[10px] font-mono font-semibold uppercase tracking-wider mb-2">
-            <Sparkles className="w-3 h-3" />
+            <Icon name="auto_awesome" size="xs" />
             <span>Gestion Réelle des Comptes</span>
           </div>
           <h1 className="text-2xl font-bold text-[#dae3ee] tracking-tight mb-1">
@@ -204,20 +199,20 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
         {/* Messages d'alerte / succès */}
         {errorMsg && (
           <div className="w-full mb-4 p-3 rounded-lg bg-[#ffb4ab]/10 border border-[#ffb4ab]/30 flex items-center gap-2.5 text-xs text-[#ffb4ab] animate-in fade-in">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <Icon name="error" size="sm" className="shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
           <div className="w-full mb-4 p-3 rounded-lg bg-[#00f2c3]/10 border border-[#00f2c3]/30 flex items-center gap-2.5 text-xs text-[#00f2c3] animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <Icon name="check_circle" size="sm" className="shrink-0" />
             <span>{successMsg}</span>
           </div>
         )}
 
-        {/* Formulaire d'inscription */}
-        <form onSubmit={handleSubmit} className="w-full space-y-4 text-xs">
+        {/* Formulaire d'inscription avec validation JavaScript personnalisée (sans infobulles natives) */}
+        <form onSubmit={handleSubmit} noValidate className="w-full space-y-4 text-xs">
           {/* 1. Sélection du Profil / Rôle */}
           <div className="space-y-1.5">
             <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
@@ -225,7 +220,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {ROLE_OPTIONS.map((opt) => {
-                const IconComponent = opt.icon;
                 const isSelected = role === opt.id;
                 return (
                   <button
@@ -244,7 +238,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                           isSelected ? 'bg-[#00f2c3] text-[#002118]' : 'bg-[#222b33] text-[#b9cac2]'
                         }`}
                       >
-                        <IconComponent className="w-4 h-4" />
+                        <Icon name={opt.iconName} size="sm" />
                       </div>
                       <span
                         className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full ${
@@ -276,40 +270,64 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
               <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
                 NOM COMPLET
               </label>
-              <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+              <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+                fieldErrors.nomComplet
+                  ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                  : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+              }`}>
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                  <User className="w-4 h-4" />
+                  <Icon name="person" size="sm" />
                 </div>
                 <input
                   id="register-nom-complet-input"
                   type="text"
-                  required
                   value={nomComplet}
-                  onChange={(e) => setNomComplet(e.target.value)}
+                  onChange={(e) => {
+                    setNomComplet(e.target.value);
+                    if (fieldErrors.nomComplet) setFieldErrors(prev => ({ ...prev, nomComplet: '' }));
+                  }}
                   placeholder="Ex: Edwin Jamel"
                   className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 text-xs"
                 />
               </div>
+              {fieldErrors.nomComplet && (
+                <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                  <Icon name="error" size="xs" />
+                  <span>{fieldErrors.nomComplet}</span>
+                </span>
+              )}
             </div>
 
             <div className="space-y-1.5">
               <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
                 IDENTIFIANT UNIQUE
               </label>
-              <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+              <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+                fieldErrors.identifiant
+                  ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                  : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+              }`}>
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                  <User className="w-4 h-4" />
+                  <Icon name="person" size="sm" />
                 </div>
                 <input
                   id="register-identifiant-input"
                   type="text"
-                  required
                   value={identifiant}
-                  onChange={(e) => setIdentifiant(e.target.value)}
+                  onChange={(e) => {
+                    setIdentifiant(e.target.value);
+                    if (fieldErrors.identifiant) setFieldErrors(prev => ({ ...prev, identifiant: '' }));
+                  }}
                   placeholder="Ex: edwin"
                   className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
                 />
               </div>
+              {fieldErrors.identifiant && (
+                <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                  <Icon name="error" size="xs" />
+                  <span>{fieldErrors.identifiant}</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -318,20 +336,32 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
               EMAIL PROFESSIONNEL
             </label>
-            <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+            <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+              fieldErrors.email
+                ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+            }`}>
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                <Mail className="w-4 h-4" />
+                <Icon name="mail" size="sm" />
               </div>
               <input
                 id="register-email-input"
                 type="email"
-                required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: '' }));
+                }}
                 placeholder="edwin@sentinelle.local"
                 className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
               />
             </div>
+            {fieldErrors.email && (
+              <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                <Icon name="error" size="xs" />
+                <span>{fieldErrors.email}</span>
+              </span>
+            )}
           </div>
 
           {/* 4. Mot de passe & Confirmation */}
@@ -340,16 +370,22 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
               <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
                 MOT DE PASSE
               </label>
-              <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+              <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+                fieldErrors.motDePasse
+                  ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                  : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+              }`}>
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                  <Lock className="w-4 h-4" />
+                  <Icon name="lock" size="sm" />
                 </div>
                 <input
                   id="register-password-input"
                   type={showPassword ? 'text' : 'password'}
-                  required
                   value={motDePasse}
-                  onChange={(e) => setMotDePasse(e.target.value)}
+                  onChange={(e) => {
+                    setMotDePasse(e.target.value);
+                    if (fieldErrors.motDePasse) setFieldErrors(prev => ({ ...prev, motDePasse: '' }));
+                  }}
                   placeholder="Min. 6 caractères"
                   className="w-full pl-9 pr-8 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
                 />
@@ -358,29 +394,47 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#b9cac2] hover:text-[#dae3ee]"
                 >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  {showPassword ? <Icon name="visibility_off" size="xs" /> : <Icon name="visibility" size="xs" />}
                 </button>
               </div>
+              {fieldErrors.motDePasse && (
+                <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                  <Icon name="error" size="xs" />
+                  <span>{fieldErrors.motDePasse}</span>
+                </span>
+              )}
             </div>
 
             <div className="space-y-1.5">
               <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
                 CONFIRMATION
               </label>
-              <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+              <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+                fieldErrors.confirmationPasse
+                  ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                  : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+              }`}>
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                  <Lock className="w-4 h-4" />
+                  <Icon name="lock" size="sm" />
                 </div>
                 <input
                   id="register-confirm-password-input"
                   type={showPassword ? 'text' : 'password'}
-                  required
                   value={confirmationPasse}
-                  onChange={(e) => setConfirmationPasse(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmationPasse(e.target.value);
+                    if (fieldErrors.confirmationPasse) setFieldErrors(prev => ({ ...prev, confirmationPasse: '' }));
+                  }}
                   placeholder="Répétez le passe"
                   className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
                 />
               </div>
+              {fieldErrors.confirmationPasse && (
+                <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                  <Icon name="error" size="xs" />
+                  <span>{fieldErrors.confirmationPasse}</span>
+                </span>
+              )}
             </div>
           </div>
 
@@ -426,7 +480,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             ) : (
               <>
                 <span>Créer mon compte & Accéder</span>
-                <UserPlus className="w-4 h-4" />
+                <Icon name="person_add" size="sm" />
               </>
             )}
           </button>
@@ -443,7 +497,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
               className="text-[#00f2c3] font-bold hover:underline inline-flex items-center gap-1 ml-1 cursor-pointer"
             >
               <span>Se connecter</span>
-              <LogIn className="w-3.5 h-3.5" />
+              <Icon name="login" size="xs" />
             </button>
           </p>
         </div>

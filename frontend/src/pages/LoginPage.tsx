@@ -1,15 +1,5 @@
 import React, { useState } from 'react';
-import {
-  User,
-  Lock,
-  LogIn,
-  KeyRound,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  X,
-  UserPlus,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { authService } from '../services/api';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -60,6 +50,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   /* Changement de profil pré-remplissant automatiquement les champs */
   const handleProfileChange = (newProfile: 'admin' | 'tech' | 'visiteur') => {
@@ -67,16 +58,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
     setUsername(DEMO_CREDENTIALS[newProfile].username);
     setPassword(DEMO_CREDENTIALS[newProfile].pass);
     setErrorMsg(null);
+    setFieldErrors({});
   };
 
   /* Soumission de la connexion réelle avec fallback sécurisé */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    setIsLoading(true);
 
+    const errors: Record<string, string> = {};
     const trimmedUser = username.trim();
     const trimmedPass = password.trim();
+
+    if (!trimmedUser) {
+      errors.username = "L'identifiant est requis.";
+    }
+    if (!trimmedPass) {
+      errors.password = 'Le mot de passe est requis.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
+    setFieldErrors({});
+    setIsLoading(true);
 
     try {
       // Appel API réel vers FastAPI /api/v1/auth/login
@@ -144,13 +150,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
         {/* Message d'erreur éventuel */}
         {errorMsg && (
           <div className="w-full mb-4 p-2.5 rounded bg-[#ffb4ab]/10 border border-[#ffb4ab]/30 flex items-center gap-2 text-xs text-[#ffb4ab]">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+            <Icon name="error" size="sm" className="shrink-0" />
             <span>{errorMsg}</span>
           </div>
         )}
 
-        {/* Formulaire de Connexion Libre & Réel */}
-        <form onSubmit={handleSubmit} className="w-full space-y-4 text-xs">
+        {/* Formulaire de Connexion Libre & Réel avec validation sans infobulles natives */}
+        <form onSubmit={handleSubmit} noValidate className="w-full space-y-4 text-xs">
 
           {/* Raccourcis de test démo optionnels */}
           <div className="space-y-1.5">
@@ -183,20 +189,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
             <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
               IDENTIFIANT
             </label>
-            <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+            <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+              fieldErrors.username
+                ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+            }`}>
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                <User className="w-4 h-4" />
+                <Icon name="person" size="sm" />
               </div>
               <input
                 id="login-username-input"
                 type="text"
-                required
                 value={username}
-                onChange={e => setUsername(e.target.value)}
+                onChange={e => {
+                  setUsername(e.target.value);
+                  if (fieldErrors.username) setFieldErrors(prev => ({ ...prev, username: '' }));
+                }}
                 placeholder="Votre identifiant (ex: edwin, admin)"
                 className="w-full pl-9 pr-3 py-2.5 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
               />
             </div>
+            {fieldErrors.username && (
+              <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                <Icon name="error" size="xs" />
+                <span>{fieldErrors.username}</span>
+              </span>
+            )}
           </div>
 
           {/* 2. MOT DE PASSE + Lien Oublié ? */}
@@ -213,16 +231,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 Oublié ?
               </button>
             </div>
-            <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
+            <div className={`relative rounded-lg bg-[#222b33] border transition-all ${
+              fieldErrors.password
+                ? 'border-[#ffb4ab] shadow-[0_0_8px_rgba(255,180,171,0.25)]'
+                : 'border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)]'
+            }`}>
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#b9cac2]">
-                <Lock className="w-4 h-4" />
+                <Icon name="lock" size="sm" />
               </div>
               <input
                 id="login-password-input"
                 type={showPassword ? 'text' : 'password'}
-                required
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={e => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) setFieldErrors(prev => ({ ...prev, password: '' }));
+                }}
                 placeholder="••••••••"
                 className="w-full pl-9 pr-9 py-2.5 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
               />
@@ -231,9 +255,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#b9cac2] hover:text-[#dae3ee]"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? <Icon name="visibility_off" size="sm" /> : <Icon name="visibility" size="sm" />}
               </button>
             </div>
+            {fieldErrors.password && (
+              <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5 animate-in fade-in">
+                <Icon name="error" size="xs" />
+                <span>{fieldErrors.password}</span>
+              </span>
+            )}
           </div>
 
           {/* 3. CODE MFA (Si Administrateur) */}
@@ -241,7 +271,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block font-mono text-[10px] font-semibold text-[#00f2c3] uppercase tracking-wider flex items-center gap-1">
-                  <KeyRound className="w-3.5 h-3.5" />
+                  <Icon name="key" size="xs" />
                   <span>CODE MFA (FACULTATIF DÉMO)</span>
                 </label>
               </div>
@@ -271,7 +301,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
             ) : (
               <>
                 <span>Se connecter</span>
-                <LogIn className="w-4 h-4" />
+                <Icon name="login" size="sm" />
               </>
             )}
           </button>
@@ -289,7 +319,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 className="text-[#00f2c3] font-bold hover:underline inline-flex items-center gap-1 ml-1 cursor-pointer"
               >
                 <span>Créer un compte</span>
-                <UserPlus className="w-3.5 h-3.5" />
+                <Icon name="person_add" size="xs" />
               </button>
             </p>
           </div>
@@ -350,7 +380,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 onClick={() => setActiveLegalModal(null)}
                 className="text-[#b9cac2] hover:text-white cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
             <div className="text-[#b9cac2] space-y-2.5 leading-relaxed text-[11px]">
@@ -405,7 +435,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 onClick={() => setShowForgotModal(false)}
                 className="text-[#b9cac2] hover:text-white cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
             <p className="text-[#b9cac2] mb-3 leading-relaxed">

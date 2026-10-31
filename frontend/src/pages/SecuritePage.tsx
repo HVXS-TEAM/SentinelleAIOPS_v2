@@ -1,13 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Globe,
-  Shield,
-  AlertTriangle,
-  X,
-  CheckCircle2,
-  Lock,
-  Zap,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { securiteService } from '../services/api';
 import {
   PieChart,
@@ -178,7 +170,7 @@ export const SecuritePage: React.FC = () => {
       {/* ── Toast de notification ─────────────────────────────────────────── */}
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1d2022] border border-[#78d8ba] text-[#78d8ba] px-4 py-2.5 rounded-lg shadow-xl font-mono text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#78d8ba]" />
+          <Icon name="check_circle" size="sm" className="text-[#78d8ba]" />
           {toastMsg}
         </div>
       )}
@@ -200,7 +192,7 @@ export const SecuritePage: React.FC = () => {
             disabled={isSimulatingBrute}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#ffb4ab]/60 bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#ffb4ab] transition-colors cursor-pointer"
           >
-            <Zap className={`w-3.5 h-3.5 text-[#ffb4ab] ${isSimulatingBrute ? 'animate-bounce' : ''}`} />
+            <Icon name="bolt" size="xs" className={`text-[#ffb4ab] ${isSimulatingBrute ? 'animate-bounce' : ''}`} />
             <span>{isSimulatingBrute ? 'SIMULATING...' : 'SIMULATE BRUTE FORCE'}</span>
           </button>
           <button
@@ -208,7 +200,7 @@ export const SecuritePage: React.FC = () => {
             onClick={() => setShowIsolateDrawer(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#81d0f8]/60 bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#81d0f8] transition-colors cursor-pointer"
           >
-            <Lock className="w-3.5 h-3.5" />
+            <Icon name="lock" size="xs" />
             ISOLATE DEVICE
           </button>
           <button
@@ -217,7 +209,7 @@ export const SecuritePage: React.FC = () => {
             disabled={isScanning}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
           >
-            <Shield className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+            <Icon name="security" size="xs" className={isScanning ? 'animate-spin' : ''} />
             {isScanning ? 'SCANNING...' : 'RUN FULL SCAN'}
           </button>
         </div>
@@ -230,7 +222,7 @@ export const SecuritePage: React.FC = () => {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider">
-                <Globe className="w-4 h-4 text-[#78d8ba]" />
+                <Icon name="public" size="sm" className="text-[#78d8ba]" />
                 GLOBAL THREAT MAP
               </div>
               <div className="flex items-center gap-4 text-xs font-mono">
@@ -331,7 +323,7 @@ export const SecuritePage: React.FC = () => {
         <div className="lg:col-span-5 bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-2">
-              <Shield className="w-4 h-4 text-[#78d8ba]" />
+              <Icon name="security" size="sm" className="text-[#78d8ba]" />
               SECURITY BENCHMARKS
             </div>
 
@@ -415,7 +407,7 @@ export const SecuritePage: React.FC = () => {
       <div className="bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider">
-            <AlertTriangle className="w-4 h-4 text-orange-400" />
+            <Icon name="warning" size="sm" className="text-orange-400" />
             RECENT SECURITY INCIDENTS
           </div>
           <button
@@ -459,7 +451,7 @@ export const SecuritePage: React.FC = () => {
                   <td className="py-3.5 text-right pr-2" onClick={e => e.stopPropagation()}>
                     {inc.action === 'Blocked' ? (
                       <span className="inline-flex items-center gap-1.5 text-emerald-400 font-bold text-xs">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <Icon name="check_circle" size="xs" />
                         Blocked
                       </span>
                     ) : (
@@ -496,7 +488,7 @@ export const SecuritePage: React.FC = () => {
                   onClick={() => setSelectedIncident(null)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 
@@ -557,7 +549,7 @@ export const SecuritePage: React.FC = () => {
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-[#272a2d]">
                 <div className="flex items-center gap-2">
-                  <Lock className="w-5 h-5 text-[#81d0f8]" />
+                  <Icon name="lock" size="md" className="text-[#81d0f8]" />
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
                     Isolation Réseau d'Urgence
                   </h3>
@@ -566,7 +558,7 @@ export const SecuritePage: React.FC = () => {
                   onClick={() => setShowIsolateDrawer(false)}
                   className="p-1.5 rounded-lg hover:bg-[#272a2d] text-[#87938e] hover:text-[#e0e3e6] transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <Icon name="close" size="md" />
                 </button>
               </div>
 

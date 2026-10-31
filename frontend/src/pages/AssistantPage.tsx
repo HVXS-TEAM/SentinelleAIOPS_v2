@@ -1,32 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Send,
-  Paperclip,
-  Eye,
-  Server,
-  FileText,
-  Bot,
-  AlertTriangle,
-  Loader2,
-  Wrench,
-  CheckCircle2,
-  X,
-  Activity,
-  ShieldCheck,
-  Trash2,
-  Copy,
-  Check,
-  Sparkles,
-  Terminal,
-  Database,
-  ArrowRight,
-} from 'lucide-react';
+import { Icon } from '../components/ui/Icon';
 import { assistantService } from '../services/api';
 import { type AuthenticatedUser } from './LoginPage';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 export interface AssistantPageProps {
   currentUser?: AuthenticatedUser | null;
+  onNavigateTab?: (tab: string) => void;
 }
 
 interface Message {
@@ -43,7 +23,7 @@ interface Message {
 const WELCOME_SUGGESTIONS = [
   {
     id: 'cisco-audit',
-    icon: ShieldCheck,
+    iconName: 'verified_user',
     title: 'Audit durcissement Cisco IOS',
     description: 'Détecter les mots de passe clairs, inspecter les VTY et appliquer les règles CIS.',
     prompt: 'line vty 0 4 password cisco',
@@ -51,7 +31,7 @@ const WELCOME_SUGGESTIONS = [
   },
   {
     id: 'ttf-saturation',
-    icon: Activity,
+    iconName: 'monitoring',
     title: 'Saturation disque prédictive (TTF)',
     description: 'Identifier les serveurs critiques risquant une saturation d’ici la fin de semaine.',
     prompt: 'Quels serveurs risquent une saturation disque cette semaine ?',
@@ -59,7 +39,7 @@ const WELCOME_SUGGESTIONS = [
   },
   {
     id: 'security-anomaly',
-    icon: AlertTriangle,
+    iconName: 'warning',
     title: 'Anomalies & Force-Brute',
     description: 'Corréler les logs récents avec l’algorithme Isolation Forest et anonymisation RGPD.',
     prompt: 'Y a-t-il eu des attaques par force brute ou des déviations récentes ?',
@@ -67,7 +47,7 @@ const WELCOME_SUGGESTIONS = [
   },
   {
     id: 'pra-continuity',
-    icon: Database,
+    iconName: 'database',
     title: 'Continuité d’activité & Sauvegardes PRA',
     description: 'Vérifier l’intégrité SHA-256 et la validité du plan de reprise d’activité.',
     prompt: 'Quel est le statut du PRA et de l’intégrité des sauvegardes ?',
@@ -77,9 +57,9 @@ const WELCOME_SUGGESTIONS = [
 
 /* ── Suggestions rapides (chips de référence) ────────────────────────────── */
 const QUICK_PROMPTS = [
-  { id: 'qp1', label: 'Analyser le trafic réseau', icon: Activity },
-  { id: 'qp2', label: 'Vérifier la conformité', icon: ShieldCheck },
-  { id: 'qp3', label: 'Résumé des alertes critiques', icon: FileText },
+  { id: 'qp1', label: 'Analyser le trafic réseau', iconName: 'monitoring' },
+  { id: 'qp2', label: 'Vérifier la conformité', iconName: 'verified_user' },
+  { id: 'qp3', label: 'Résumé des alertes critiques', iconName: 'description' },
 ];
 
 /* ── Table de démo de la maquette de référence ───────────────────────────── */
@@ -104,7 +84,7 @@ const DEMO_PREDICTIVE_SERVERS = [
   },
 ];
 
-export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser }) => {
+export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNavigateTab }) => {
   /* La discussion démarre vide pour un accueil élégant et personnalisé à la ChatGPT / Gemini */
   const [messages, setMessages] = useState<Message[]>([]);
 
@@ -253,30 +233,30 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser }) => 
         sources = ['Supervision Télémétrie', 'NetFlow / sFlow'];
         followups = ['Voir les alertes associées au pic de trafic', 'Limiter la bande passante sur CORE-RTR-01'];
         aiContent = 
-`### 📊 Analyse du Trafic Réseau & Liens Inter-Datacenter
+`### Analyse du Trafic Réseau & Liens Inter-Datacenter
 
 L'inspection en temps réel du trafic NetFlow / sFlow montre un pic anormal sur le lien d'interconnexion :
-- 🔴 **CORE-RTR-01 → DIST-SW-A** : **2.4 Gbps** (Capacité nominale : 2.5 Gbps, saturation à 96%).
-- 🟠 **Flux prédominant** : \`TCP/443\` (Synchronisation continue des bases de données inter-DC).
-- 🟢 **Recommandation QoS** : Activation immédiate d'une limitation de bande passante par classe de service.`;
+- [CRITIQUE] **CORE-RTR-01 → DIST-SW-A** : **2.4 Gbps** (Capacité nominale : 2.5 Gbps, saturation à 96%).
+- [MAJEUR] **Flux prédominant** : \`TCP/443\` (Synchronisation continue des bases de données inter-DC).
+- [CONFORME] **Recommandation QoS** : Activation immédiate d'une limitation de bande passante par classe de service.`;
       } else if (q.includes('conformité') || q.includes('cis') || q.includes('benchmark')) {
         sources = ['NetDevOps CIS Benchmark', 'Cisco IOS 15'];
         followups = ['Comment corriger les failles de DIST-SW-A ?', 'Sauvegarder les configurations actives'];
         aiContent = 
-`### 🔒 Audit de Conformité CIS Benchmark Cisco IOS
+`### Audit de Conformité CIS Benchmark Cisco IOS
 
 Résultat synthétique du dernier audit de durcissement sur vos commutateurs et routeurs :
-- 🟢 **FW-EXT-02** (Firewall) : **100% de conformité** (0 violation).
-- 🟠 **CORE-RTR-01** (Routeur Core) : **82% de conformité** (2 violations mineures).
-- 🔴 **DIST-SW-A** (Switch Distribution) : **65% de conformité** (5 violations critiques).
+- [CONFORME] **FW-EXT-02** (Firewall) : **100% de conformité** (0 violation).
+- [ATTENTION] **CORE-RTR-01** (Routeur Core) : **82% de conformité** (2 violations mineures).
+- [NON-CONFORME] **DIST-SW-A** (Switch Distribution) : **65% de conformité** (5 violations critiques).
 
-⚠️ **Vulnérabilités majeures détectées sur DIST-SW-A :**
-- Ligne VTY avec mot de passe en clair (\`cisco\`).
-- Protocole Telnet actif sans SSH imposé (\`transport input all\`).`;
+**[ALERTE - AUDIT CIS] Vulnérabilités majeures détectées sur DIST-SW-A :**
+- [CRITIQUE - CIS 1.1.1] Ligne VTY avec mot de passe en clair (\`cisco\`).
+- [CRITIQUE - CIS 1.2.2] Protocole Telnet actif sans SSH imposé (\`transport input all\`).`;
       } else {
         sources = ['Gestion de Parc', 'Supervision TTF', 'Sécurité'];
         aiContent = 
-`### 🌐 Synthèse Globale Sentinelle AIOps
+`### Synthèse Globale Sentinelle AIOps
 
 Analyse contextuelle de votre infrastructure :
 - **Équipements supervisés** : 3 nœuds actifs, 1 nécessitant une attention urgente (DIST-SW-A).
@@ -299,9 +279,40 @@ Analyse contextuelle de votre infrastructure :
     }, 600);
   };
 
+  /* Filtrage strict : conversion des émojis en tags cliniques normalisés et purge Unicode */
+  const sanitizeClinicalText = (raw: string): string => {
+    const replacements: Array<[string, string]> = [
+      ['🔴', '[CRITIQUE] '],
+      ['🚨', '[CRITIQUE] '],
+      ['🟠', '[MAJEUR] '],
+      ['🟡', '[MINEUR] '],
+      ['⚠️', '[ALERTE] '],
+      ['⚠', '[ALERTE] '],
+      ['🟢', '[CONFORME] '],
+      ['✅', '[CONFORME] '],
+      ['🔒', '[AUDIT CIS] '],
+      ['🛡️', ''],
+      ['🛡', ''],
+      ['🔍', ''],
+      ['📊', ''],
+      ['⏳', ''],
+      ['📋', ''],
+      ['🌐', ''],
+    ];
+    let cleaned = raw;
+    for (const [emoji, tag] of replacements) {
+      cleaned = cleaned.split(emoji).join(tag);
+    }
+    return cleaned
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{FE0F}]/gu, '')
+      .replace(/(\[(?:CRITIQUE|MAJEUR|MINEUR|CONFORME|ALERTE|AUDIT CIS)\])\s+\1/g, '$1')
+      .replace(/[ \t]{2,}/g, ' ');
+  };
+
   /* Rendu formaté d'un message textuel (Markdown, Code blocks, Badges) */
   const renderTextChunk = (text: string, key: string) => {
-    const lines = text.split('\n');
+    const cleanText = sanitizeClinicalText(text);
+    const lines = cleanText.split('\n');
     return (
       <div key={key} className="space-y-1.5 leading-relaxed text-sm text-[#dfe4e0]">
         {lines.map((line, idx) => {
@@ -309,8 +320,8 @@ Analyse contextuelle de votre infrastructure :
           if (line.startsWith('### ')) {
             return (
               <h4 key={idx} className="text-sm font-bold text-[#78d8ba] font-mono flex items-center gap-1.5 pt-1 pb-0.5 border-b border-[#3e4945]/40">
-                <Sparkles className="w-3.5 h-3.5 text-[#78d8ba]" />
-                <span>{line.replace('### ', '')}</span>
+                <Icon name="auto_awesome" size="xs" className="text-[#78d8ba]" />
+                <span>{line.replace('### ', '').trim()}</span>
               </h4>
             );
           }
@@ -329,6 +340,46 @@ Analyse contextuelle de votre infrastructure :
     );
   };
 
+  // ── Colorateur syntaxique Cisco IOS & Shell ──────────────────────────────
+  const highlightCiscoLine = (line: string): React.ReactNode => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('!')) {
+      return <span className="text-[#87938e] italic">{line}</span>;
+    }
+
+    const ciscoKeywords = [
+      'configure terminal', 'conf t', 'end', 'exit', 'write memory', 'wr mem', 'write',
+      'service password-encryption', 'no service password-encryption',
+      'transport input ssh', 'transport input telnet', 'login local',
+      'logging synchronous', 'exec-timeout', 'enable secret', 'enable password',
+      'username', 'ip ssh version', 'crypto key generate rsa', 'line vty', 'line con',
+      'interface', 'ip address', 'no shutdown', 'shutdown'
+    ];
+
+    const tokens = line.split(/(\s+)/);
+    return (
+      <span>
+        {tokens.map((token, idx) => {
+          const lower = token.toLowerCase();
+          if (ciscoKeywords.includes(lower) || ['line', 'interface', 'vlan', 'ip', 'no', 'service', 'transport'].includes(lower)) {
+            return <span key={idx} className="text-[#81d0f8] font-semibold">{token}</span>;
+          }
+          if (['ssh', 'secret', 'sha256', 'type 9', 'type 8', 'type 5', 'quarantine'].includes(lower)) {
+            return <span key={idx} className="text-[#78d8ba] font-bold">{token}</span>;
+          }
+          if (['telnet', 'cisco', 'v1', 'v2c', 'password'].includes(lower)) {
+            return <span key={idx} className="text-[#ffb4ab] font-bold">{token}</span>;
+          }
+          if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/.test(token)) {
+            return <span key={idx} className="text-[#a7c8ff] underline decoration-dotted">{token}</span>;
+          }
+          return <span key={idx} className="text-[#dfe4e0]">{token}</span>;
+        })}
+      </span>
+    );
+  };
+
+  // ── Rendu structuré des blocs CLI avec Action NetDevOps ──────────────────
   const renderAssistantMessage = (content: string | React.ReactNode, msgId: string) => {
     if (typeof content !== 'string') return content;
 
@@ -342,37 +393,75 @@ Analyse contextuelle de votre infrastructure :
       if (match.index > lastIndex) {
         parts.push(renderTextChunk(content.substring(lastIndex, match.index), `${msgId}-t-${lastIndex}`));
       }
-      const lang = match[1] || 'CLI';
-      const code = match[2];
+      const lang = match[1] || 'Cisco IOS';
+      const code = match[2].trim();
       const codeId = `${msgId}-code-${blockIdx++}`;
+      const lines = code.split('\n');
+
       parts.push(
-        <div key={codeId} className="my-3 rounded-lg overflow-hidden border border-[#3e4945] bg-[#0b0f11] font-mono text-xs shadow-md">
-          <div className="px-3 py-1.5 bg-[#181d1b] border-b border-[#3e4945]/60 flex items-center justify-between text-[11px] text-[#bdc9c3]">
-            <div className="flex items-center gap-1.5 text-[#78d8ba]">
-              <Terminal className="w-3.5 h-3.5" />
+        <div key={codeId} className="my-3 rounded-lg overflow-hidden border border-[#3e4945] bg-[#070a0b] font-mono text-xs shadow-lg">
+          {/* En-tête du terminal */}
+          <div className="px-3 py-1.5 bg-[#14181a] border-b border-[#3e4945]/60 flex items-center justify-between text-[11px] text-[#bdc9c3]">
+            <div className="flex items-center gap-2 text-[#78d8ba]">
+              <Icon name="terminal" size="xs" />
               <span className="uppercase font-bold tracking-wider">{lang}</span>
+              <span className="text-[10px] text-[#87938e]">• {lines.length} lignes</span>
             </div>
-            <button
-              onClick={() => copyToClipboard(code.trim(), codeId)}
-              className="flex items-center gap-1 text-[#78d8ba] hover:text-[#dfe4e0] px-2 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
-              title="Copier les commandes dans le presse-papiers"
-            >
-              {copiedCodeId === codeId ? (
-                <>
-                  <Check className="w-3 h-3 text-[#78d8ba]" />
-                  <span className="text-[10px] text-[#78d8ba] font-bold">Copié !</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3 h-3" />
-                  <span className="text-[10px]">Copier</span>
-                </>
-              )}
-            </button>
+
+            <div className="flex items-center gap-2">
+              {/* Bouton Copier */}
+              <button
+                onClick={() => copyToClipboard(code, codeId)}
+                className="flex items-center gap-1 text-[#bdc9c3] hover:text-[#78d8ba] px-2 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
+                title="Copier les commandes dans le presse-papiers"
+              >
+                {copiedCodeId === codeId ? (
+                  <>
+                    <Icon name="check" size="xs" className="text-[#78d8ba]" />
+                    <span className="text-[10px] text-[#78d8ba] font-bold">Copié !</span>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="content_copy" size="xs" />
+                    <span className="text-[10px]">Copier</span>
+                  </>
+                )}
+              </button>
+
+              {/* Bouton Passerelle Déployer vers NetDevOps */}
+              <button
+                onClick={() => {
+                  sessionStorage.setItem('netdevops:prefill_code', code);
+                  if (onNavigateTab) {
+                    onNavigateTab('netdevops');
+                  }
+                }}
+                className="flex items-center gap-1 bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-bold px-2.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer shadow-sm active:scale-95"
+                title="Transférer directement ce script vers le module NetDevOps"
+              >
+                <Icon name="rocket_launch" size="xs" />
+                <span>Déployer via NetDevOps</span>
+              </button>
+            </div>
           </div>
-          <pre className="p-3 text-[#78d8ba] overflow-x-auto leading-relaxed whitespace-pre font-mono">
-            {code.trim()}
-          </pre>
+
+          {/* Corps avec numérotation et coloration */}
+          <div className="p-3 overflow-x-auto leading-relaxed max-h-[340px] select-text">
+            <table className="w-full border-collapse">
+              <tbody>
+                {lines.map((l, lIdx) => (
+                  <tr key={lIdx} className="hover:bg-white/[0.02]">
+                    <td className="w-7 pr-3 text-right text-[#87938e]/40 select-none text-[11px] align-top">
+                      {lIdx + 1}
+                    </td>
+                    <td className="whitespace-pre pl-1 text-[12px]">
+                      {highlightCiscoLine(l)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
       lastIndex = match.index + match[0].length;
@@ -399,12 +488,12 @@ Analyse contextuelle de votre infrastructure :
         </div>
         <div className="hidden sm:flex items-center gap-3 text-[11px] text-[#87938e]">
           <span className="flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-[#78d8ba]" />
+            <Icon name="check_circle" size="xs" className="text-[#78d8ba]" />
             Isolation Forest Synchro
           </span>
           <span>•</span>
           <span className="flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-[#81d0f8]" />
+            <Icon name="verified_user" size="xs" className="text-[#81d0f8]" />
             Anonymisation IP RGPD
           </span>
         </div>
@@ -440,7 +529,6 @@ Analyse contextuelle de votre infrastructure :
             {/* 4 Cartes d'action rapide modernes (Style ChatGPT / Gemini) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full text-left">
               {WELCOME_SUGGESTIONS.map((card) => {
-                const IconComponent = card.icon;
                 return (
                   <button
                     key={card.id}
@@ -456,9 +544,9 @@ Analyse contextuelle de votre infrastructure :
                           color: card.color,
                         }}
                       >
-                        <IconComponent className="w-3 h-3" />
+                        <Icon name={card.iconName} size="xs" />
                       </div>
-                      <ArrowRight className="w-3.5 h-3.5 text-[#87938e] group-hover:text-[#78d8ba] group-hover:translate-x-0.5 transition-all" />
+                      <Icon name="arrow_forward" size="xs" className="text-[#87938e] group-hover:text-[#78d8ba] group-hover:translate-x-0.5 transition-all" />
                     </div>
                     <div>
                       <h3 className="text-xs font-bold text-[#e0e3e6] group-hover:text-[#78d8ba] transition-colors mb-0.5 assistant-card-title">
@@ -541,9 +629,9 @@ Analyse contextuelle de votre infrastructure :
                                   }`}
                                 >
                                   {srv.isCritical ? (
-                                    <AlertTriangle className="w-4 h-4 text-[#ffb4ab] animate-pulse" />
+                                    <Icon name="warning" size="sm" className="text-[#ffb4ab] animate-pulse" />
                                   ) : (
-                                    <Server className="w-4 h-4 text-[#78d8ba]" />
+                                    <Icon name="dns" size="sm" className="text-[#78d8ba]" />
                                   )}
                                   <span>{srv.name}</span>
                                 </div>
@@ -569,7 +657,7 @@ Analyse contextuelle de votre infrastructure :
                             onClick={handleStartCleanup}
                             className="bg-[#1F8A70]/15 border border-[#1F8A70]/40 text-[#78d8ba] hover:bg-[#1F8A70]/30 text-xs px-4 py-2 rounded uppercase tracking-wider transition-all flex items-center gap-2 font-bold shadow-sm cursor-pointer"
                           >
-                            <Wrench className="w-3.5 h-3.5" />
+                            <Icon name="build" size="xs" />
                             <span>Proposer nettoyage</span>
                           </button>
                         </div>
@@ -580,7 +668,7 @@ Analyse contextuelle de votre infrastructure :
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-4 pt-3 border-t border-[#3e4945]/40 flex flex-wrap items-center gap-2 text-[10px] font-mono">
                         <span className="text-[#87938e] flex items-center gap-1">
-                          <Database className="w-3 h-3 text-[#78d8ba]" />
+                          <Icon name="database" size="xs" className="text-[#78d8ba]" />
                           Sources RAG :
                         </span>
                         {msg.sources.map((s, idx) => (
@@ -602,7 +690,7 @@ Analyse contextuelle de votre infrastructure :
                   {msg.suggestedFollowups && msg.suggestedFollowups.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 pl-2">
                       <span className="text-[11px] text-[#87938e] flex items-center gap-1 font-mono">
-                        <Sparkles className="w-3 h-3 text-[#78d8ba]" />
+                        <Icon name="auto_awesome" size="xs" className="text-[#78d8ba]" />
                         Approfondir :
                       </span>
                       {msg.suggestedFollowups.map((f, idx) => (
@@ -612,7 +700,7 @@ Analyse contextuelle de votre infrastructure :
                           className="text-[11px] text-[#dfe4e0] hover:text-[#78d8ba] bg-[#181d1b] hover:bg-[#262b29] border border-[#3e4945]/60 hover:border-[#78d8ba]/40 px-2.5 py-1 rounded-full transition-colors flex items-center gap-1 cursor-pointer font-sans shadow-sm assistant-followup-chip"
                         >
                           <span>{f}</span>
-                          <ArrowRight className="w-2.5 h-2.5 text-[#78d8ba]" />
+                          <Icon name="arrow_forward" size={10} className="text-[#78d8ba]" />
                         </button>
                       ))}
                     </div>
@@ -626,10 +714,10 @@ Analyse contextuelle de votre infrastructure :
           {isTyping && (
             <div className="flex gap-4 self-start max-w-[90%] w-full">
               <div className="w-10 h-10 rounded-lg bg-[#1d2022] flex items-center justify-center border border-[#78d8ba]/30 shrink-0 mt-1">
-                <Bot className="w-5 h-5 text-[#78d8ba] animate-bounce" />
+                <Icon name="smart_toy" size="md" className="text-[#78d8ba] animate-bounce" />
               </div>
               <div className="bg-[#1d2022] border border-[#3e4945]/40 rounded-2xl rounded-tl-sm px-6 py-4 shadow-sm flex items-center gap-2.5">
-                <Loader2 className="w-4 h-4 text-[#78d8ba] animate-spin" />
+                <Icon name="progress_activity" size="sm" className="text-[#78d8ba] animate-spin" />
                 <span className="text-xs text-[#bdc9c3] font-mono">
                   Sentinelle IA consulte les métriques Prometheus et les logs prédictifs...
                 </span>
@@ -643,13 +731,12 @@ Analyse contextuelle de votre infrastructure :
       </div>
 
       {/* ── Zone de Saisie Inférieure (Fixe en bas avec blur) ──────────── */}
-      <div className="bg-[#101416]/90 backdrop-blur-xl border-t border-[#3e4945]/30 p-4 shrink-0 w-full z-30 assistant-bottom-bar">
+      <div className="bg-[#101416]/90 backdrop-blur-xl border-t border-[#3e4945]/30 p-4 shrink-0 w-full relative z-10 assistant-bottom-bar">
         <div className="max-w-4xl mx-auto flex flex-col gap-2.5">
           {/* Suggestion Chips & Nouvelle discussion (affichés en cours de discussion) */}
           {messages.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 mb-0.5">
               {QUICK_PROMPTS.map(chip => {
-                const Icon = chip.icon;
                 return (
                   <button
                     key={chip.id}
@@ -657,7 +744,7 @@ Analyse contextuelle de votre infrastructure :
                     onClick={() => handleSendPrompt(chip.label)}
                     className="bg-[#1d2022] border border-[#3e4945]/50 hover:border-[#78d8ba] hover:text-[#78d8ba] text-[#bdc9c3] text-[13px] px-4 py-1.5 rounded-full transition-all flex items-center gap-2 shadow-sm cursor-pointer assistant-chip"
                   >
-                    <Icon className="w-3.5 h-3.5 text-[#78d8ba]" />
+                    <Icon name={chip.iconName} size="xs" className="text-[#78d8ba]" />
                     <span>{chip.label}</span>
                   </button>
                 );
@@ -669,7 +756,7 @@ Analyse contextuelle de votre infrastructure :
                 className="bg-[#1d2022] border border-[#3e4945]/50 hover:border-[#ffb4ab]/60 hover:text-[#ffb4ab] text-[#bdc9c3] text-xs px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ml-auto"
                 title="Réinitialiser l'écran d'accueil"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Icon name="delete" size="xs" />
                 <span>Nouvelle discussion</span>
               </button>
             </div>
@@ -696,7 +783,7 @@ Analyse contextuelle de votre infrastructure :
             {/* Badge LECTURE SEULE */}
             <div className="absolute bottom-2.5 left-3.5 flex items-center gap-2">
               <div className="bg-[#272a2d] border border-[#3e4945]/50 px-2 py-0.5 rounded text-[#bdc9c3] text-[10px] font-mono uppercase tracking-wider flex items-center gap-1.5 assistant-readonly-badge">
-                <Eye className="w-3 h-3 text-[#78d8ba]" />
+                <Icon name="visibility" size="xs" className="text-[#78d8ba]" />
                 <span>Lecture seule</span>
               </div>
             </div>
@@ -718,7 +805,7 @@ Analyse contextuelle de votre infrastructure :
                 title="Joindre un fichier de configuration ou journal (.cfg, .log, .json, .yaml)"
                 className="w-9 h-9 rounded-lg text-[#bdc9c3] hover:text-[#dfe4e0] hover:bg-[#272a2d] transition-colors flex items-center justify-center cursor-pointer"
               >
-                <Paperclip className="w-4 h-4" />
+                <Icon name="attach_file" size="sm" />
               </button>
               <button
                 id="assistant-btn-send"
@@ -730,7 +817,7 @@ Analyse contextuelle de votre infrastructure :
                     : 'bg-[#272a2d] text-[#bdc9c3]/40 cursor-not-allowed'
                 }`}
               >
-                <Send className="w-4 h-4" />
+                <Icon name="send" size="sm" />
               </button>
             </div>
           </div>
@@ -750,7 +837,7 @@ Analyse contextuelle de votre infrastructure :
             <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-[#78d8ba]/10 border border-[#78d8ba]/30 flex items-center justify-center text-[#78d8ba]">
-                  <Trash2 className="w-4 h-4" />
+                  <Icon name="delete" size="sm" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-[#dfe4e0]">
@@ -765,7 +852,7 @@ Analyse contextuelle de votre infrastructure :
                 onClick={() => setShowCleanupModal(false)}
                 className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
               >
-                <X className="w-4 h-4" />
+                <Icon name="close" size="sm" />
               </button>
             </div>
 
@@ -781,7 +868,7 @@ Analyse contextuelle de votre infrastructure :
 
               {cleanupStep === 'done' && (
                 <div className="p-3 bg-[#3da186]/10 border border-[#3da186]/30 rounded-lg flex items-center gap-2 text-xs text-[#78d8ba]">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <Icon name="check_circle" size="sm" className="shrink-0" />
                   <span>
                     Remédiation terminée avec succès : 18.4 Go récupérés. Le serveur est désormais à 58.1% d'usage.
                   </span>
