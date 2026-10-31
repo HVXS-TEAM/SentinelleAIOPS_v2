@@ -14,16 +14,19 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-const NIGHT_START_HOUR = 19; // 19:00 (7 PM)
-const NIGHT_END_HOUR = 7;   // 07:00 (7 AM)
+const NIGHT_START_HOUR = 19; // 19:00 (7 PM) -> Bascule automatique en Mode Nocturne (Laser SOC)
+const NIGHT_END_HOUR = 7;    // 07:00 (7 AM) -> Bascule automatique en Mode Jour (Haute Lisibilité)
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Par défaut au lancement de la session, le thème suit automatiquement l'heure système ('auto')
   const [preference, setPreferenceState] = useState<ThemePreference>(() => {
     try {
-      const stored = localStorage.getItem('sentinelle_theme_preference');
-      if (stored === 'night' || stored === 'day' || stored === 'auto') {
-        return stored;
+      const sessionPref = sessionStorage.getItem('sentinelle_theme_preference');
+      if (sessionPref === 'night' || sessionPref === 'day' || sessionPref === 'auto') {
+        return sessionPref;
       }
+      // Réinitialise l'ancien localStorage bloqué pour garantir la bascule horaire automatique
+      localStorage.setItem('sentinelle_theme_preference', 'auto');
     } catch {
       /* ignore */
     }
@@ -32,17 +35,18 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [currentHour, setCurrentHour] = useState<number>(() => new Date().getHours());
 
-  // Mise à jour de l'heure toutes les minutes pour recalculer le mode temporel
+  // Vérification horaire toutes les 15 secondes pour basculer automatiquement à 07h00 et 19h00
   useEffect(() => {
     const updateTime = () => setCurrentHour(new Date().getHours());
-    const interval = setInterval(updateTime, 60000);
+    updateTime();
+    const interval = setInterval(updateTime, 15000);
     return () => clearInterval(interval);
   }, []);
 
   // Détection de la tranche horaire nocturne (19h00 -> 07h00)
   const isNightTime = currentHour >= NIGHT_START_HOUR || currentHour < NIGHT_END_HOUR;
 
-  // Détermination du thème actif effectif
+  // Détermination du thème actif effectif selon l'heure ou le choix manuel
   const activeTheme: ActiveTheme =
     preference === 'auto'
       ? isNightTime
@@ -50,7 +54,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         : 'day'
       : preference;
 
-  // Application de la classe sur l'élément racine <html> et <body>
+  // Application de la classe sur l'élément racine <html>
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove('theme-night', 'theme-day', 'dark', 'light');
@@ -67,13 +71,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setPreference = (pref: ThemePreference) => {
     setPreferenceState(pref);
     try {
+      sessionStorage.setItem('sentinelle_theme_preference', pref);
       localStorage.setItem('sentinelle_theme_preference', pref);
     } catch {
       /* ignore */
     }
   };
 
-  // Cycle entre auto -> night -> day -> auto
+  // Cycle entre auto (selon l'heure) -> night -> day -> auto
   const cycleTheme = () => {
     if (preference === 'auto') {
       setPreference('night');

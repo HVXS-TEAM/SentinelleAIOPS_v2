@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Icon } from '../components/ui/Icon';
 import { authService } from '../services/api';
+import { useTheme } from '../context/ThemeContext';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 export interface AuthenticatedUser {
@@ -42,6 +43,7 @@ const DEMO_CREDENTIALS: Record<string, { username: string; pass: string; name: s
 };
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchToRegister }) => {
+  const { activeTheme, preference, currentHour, cycleTheme } = useTheme();
   const [profile, setProfile] = useState<'admin' | 'tech' | 'visiteur'>('admin');
   const [username, setUsername] = useState(DEMO_CREDENTIALS.admin.username);
   const [password, setPassword] = useState(DEMO_CREDENTIALS.admin.pass);
@@ -116,14 +118,45 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
   return (
     <div
       className="h-screen w-full flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden p-4 sm:p-6 md:p-8 relative scroll-smooth font-sans text-[#dae3ee]"
-      style={{
-        backgroundColor: '#0D1117',
-        backgroundImage: 'radial-gradient(#161B22 1.5px, transparent 1.5px)',
-        backgroundSize: '20px 20px',
-      }}
+      style={
+        activeTheme === 'night'
+          ? {
+              backgroundColor: '#0D1117',
+              backgroundImage: 'radial-gradient(#161B22 1.5px, transparent 1.5px)',
+              backgroundSize: '20px 20px',
+            }
+          : {
+              backgroundColor: '#f4f6f8',
+              backgroundImage: 'radial-gradient(#cbd5e1 1.2px, transparent 1.2px)',
+              backgroundSize: '20px 20px',
+            }
+      }
     >
+      {/* Badge de Thème Horaire Automatique (Haut-Droite) */}
+      <div className="fixed top-4 right-4 z-30">
+        <button
+          type="button"
+          onClick={cycleTheme}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[11px] font-mono transition-all cursor-pointer shadow-sm ${
+            activeTheme === 'night'
+              ? 'bg-[#14181b] border-[#252c32] text-[#78d8ba] hover:border-[#78d8ba]'
+              : 'bg-white border-slate-200 text-slate-700 hover:border-teal-600'
+          }`}
+          title="Cliquer pour basculer entre Mode Horaire Auto (07h-19h Jour / 19h-07h Nuit), Mode Nuit forcé et Mode Jour forcé"
+        >
+          <Icon name={activeTheme === 'night' ? 'dark_mode' : 'light_mode'} size="xs" />
+          <span>
+            {preference === 'auto'
+              ? `Auto (${currentHour}h • ${activeTheme === 'night' ? 'Nuit' : 'Jour'})`
+              : preference === 'night'
+              ? 'Thème : Nuit'
+              : 'Thème : Jour'}
+          </span>
+        </button>
+      </div>
+
       {/* ── Carte Centrale en Glassmorphism (Maquette Stitch) ─────────── */}
-      <div className="w-full max-w-[420px] my-auto py-6 sm:py-8 px-6 sm:px-8 bg-[rgba(22,27,34,0.75)] backdrop-blur-xl border border-[#30363d]/60 rounded-2xl flex flex-col items-center shadow-[0_8px_32px_rgba(0,0,0,0.6)] relative z-10 shrink-0 animate-in zoom-in-95 duration-200">
+      <div className="w-full max-w-[420px] my-auto py-6 sm:py-8 px-6 sm:px-8 bg-[#161c22] border border-[#30363d]/60 rounded-2xl flex flex-col items-center shadow-[0_8px_32px_rgba(0,0,0,0.6)] relative z-10 shrink-0 animate-in zoom-in-95 duration-200">
 
         {/* Logo Sentinelle au centre avec Halo lumineux (Conforme maquette Stitch) */}
         <div className="mb-6 w-24 h-24 relative flex items-center justify-center">
