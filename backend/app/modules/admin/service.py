@@ -12,19 +12,20 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import settings
+from backend.app.core.config import settings, DATA_DIR, DB_FILE_PATH, BACKUP_DIR as CFG_BACKUP_DIR
 from backend.app.core.security import get_password_hash
 from backend.app.db.models import User, JournalAudit
 
-BASE_DIR = Path(__file__).resolve().parents[4]
-DB_PATH = Path(settings.DATABASE_URL.replace("sqlite:///", ""))
-BACKUP_DIR = BASE_DIR / "backup"
+BASE_DIR = DATA_DIR
+DB_PATH = DB_FILE_PATH
+BACKUP_DIR = CFG_BACKUP_DIR
 
 
 def _record_audit(
@@ -197,7 +198,12 @@ class AdminService:
         backup_filename = f"sentinelle_backup_{ts_str}.db"
         backup_file = BACKUP_DIR / backup_filename
 
-        shutil.copy2(DB_PATH, backup_file)
+        # Sauvegarde à chaud atomique via l'API native SQLite (compatible mode WAL)
+        try:
+            with sqlite3.connect(str(DB_PATH)) as src_conn, sqlite3.connect(str(backup_file)) as dst_conn:
+                src_conn.backup(dst_conn)
+        except Exception:
+            shutil.copy2(DB_PATH, backup_file)
         sha = _calculate_sha256(backup_file)
 
         hash_file = backup_file.with_suffix(".sha256")

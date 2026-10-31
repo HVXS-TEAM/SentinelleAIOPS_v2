@@ -51,6 +51,7 @@ if sys.stdout is None or sys.stderr is None:
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
 
+import psutil
 import uvicorn
 from fastapi import Request
 from fastapi.responses import FileResponse
@@ -86,6 +87,55 @@ def is_port_in_use(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.4)
         return s.connect_ex((host, port)) == 0
+
+
+def ensure_clean_port(host: str, preferred_port: int = 8000) -> int:
+    """
+    Libère le port en arrêtant toute ancienne instance résiduelle de Sentinelle-AIOps
+    ou bascule sur un port libre si un service tiers occupe le port 8000.
+    """
+    current_pid = os.getpid()
+    parent_pid = os.getppid()
+
+    # 1. Arrêter les anciennes instances de Sentinelle-AIOps restées en arrière-plan
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            pid = proc.info["pid"]
+            name = (proc.info["name"] or "").lower()
+            if pid in (current_pid, parent_pid):
+                continue
+            if "sentinelle-aiops" in name:
+                proc.terminate()
+        except Exception:
+            pass
+
+    # 2. Si le port préféré est encore occupé, tenter de terminer le processus détenteur
+    if is_port_in_use(host, preferred_port):
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                if proc.info["pid"] in (current_pid, parent_pid):
+                    continue
+                for conn in proc.net_connections(kind="inet"):
+                    if conn.laddr and conn.laddr.port == preferred_port:
+                        proc.terminate()
+            except Exception:
+                pass
+        for _ in range(10):
+            if not is_port_in_use(host, preferred_port):
+                break
+            time.sleep(0.15)
+
+    # 3. Vérifier que l'on peut effectivement binder le port préféré, sinon trouver un port libre
+    for candidate_port in (preferred_port, 8001, 8080, 8888):
+        if not is_port_in_use(host, candidate_port):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_sock:
+                    test_sock.bind((host, candidate_port))
+                return candidate_port
+            except OSError:
+                continue
+
+    return preferred_port
 
 
 def setup_database() -> None:
@@ -503,28 +553,38 @@ class SentinelleLauncherWindow(QWidget):
                 self.signals.progress.emit(70, "probe", "Activation de la sonde matérielle hôte (psutil)...")
                 time.sleep(0.2)
 
-                self.signals.progress.emit(88, "api", f"Démarrage du serveur applicatif interne sur {APP_URL}...")
-                if not is_port_in_use(HOST, PORT):
-                    config = uvicorn.Config(
-                        app,
-                        host=HOST,
-                        port=PORT,
-                        log_level="warning",
-                        access_log=False,
-                        log_config=None,
-                    )
-                    self.server = uvicorn.Server(config)
-                    srv_thread = threading.Thread(target=self.server.run, daemon=True)
-                    srv_thread.start()
+                global PORT, APP_URL
+                PORT = ensure_clean_port(HOST, PORT)
+                APP_URL = f"http://{HOST}:{PORT}"
 
-                # Attendre que l'API réponde effectivement sur /api/v1/health
-                for _ in range(30):
+                self.signals.progress.emit(88, "api", f"Démarrage du serveur applicatif interne sur {APP_URL}...")
+                config = uvicorn.Config(
+                    app,
+                    host=HOST,
+                    port=PORT,
+                    log_level="warning",
+                    access_log=False,
+                    log_config=None,
+                )
+                self.server = uvicorn.Server(config)
+                srv_thread = threading.Thread(target=self.server.run, daemon=True)
+                srv_thread.start()
+
+                # Attendre que l'API et la base de données SQLite répondent effectivement
+                api_online = False
+                for _ in range(60):
                     try:
-                        with urllib.request.urlopen(f"{APP_URL}/api/v1/health", timeout=0.5) as resp:
+                        with urllib.request.urlopen(f"{APP_URL}/api/v1/health", timeout=0.6) as resp:
                             if resp.status == 200:
-                                break
+                                with urllib.request.urlopen(f"{APP_URL}/api/v1/admin/users", timeout=0.8) as db_resp:
+                                    if db_resp.status == 200:
+                                        api_online = True
+                                        break
                     except Exception:
                         time.sleep(0.15)
+
+                if not api_online:
+                    raise RuntimeError(f"Le serveur API/SQLite sur {APP_URL} n'a pas pu démarrer.")
 
                 self.signals.progress.emit(100, "done", "[OPÉRATIONNEL] Tous les systèmes Sentinelle AIOps sont actifs.")
                 self.signals.ready.emit()

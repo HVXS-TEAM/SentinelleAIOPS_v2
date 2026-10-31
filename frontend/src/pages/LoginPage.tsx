@@ -101,13 +101,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
       onLoginSuccess(user);
     } catch (err: unknown) {
       let errorDetail: string | null = null;
+      let hasResponse = false;
       if (err && typeof err === 'object' && 'response' in err) {
-        const resp = (err as { response?: { data?: { detail?: string } } }).response;
-        if (resp?.data?.detail && typeof resp.data.detail === 'string') {
-          errorDetail = resp.data.detail;
+        const resp = (err as { response?: { status?: number; data?: { detail?: string } } }).response;
+        if (resp) {
+          hasResponse = true;
+          if (resp.data?.detail && typeof resp.data.detail === 'string') {
+            errorDetail = resp.data.detail;
+          }
         }
       }
-      setErrorMsg(errorDetail ?? 'Identifiant ou mot de passe incorrect.');
+      if (!hasResponse) {
+        setErrorMsg('Serveur API local injoignable. Relancez le lanceur Sentinelle AIOps.');
+      } else {
+        setErrorMsg(errorDetail ?? 'Identifiant ou mot de passe incorrect.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -164,8 +172,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
           <div className="w-24 h-24 rounded-2xl bg-[#0b0f11] border border-[#00f2c3]/40 overflow-hidden relative shadow-[0_0_25px_rgba(0,242,195,0.25)] flex items-center justify-center p-2">
             <img
               src="/sentinelle_logo.png"
-              alt="Sentinelle AIOps Logo"
+              alt="Sentinelle AIOps"
               className="w-full h-full object-contain scale-110 drop-shadow-[0_0_8px_rgba(0,242,195,0.4)]"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
             />
           </div>
         </div>

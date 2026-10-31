@@ -3,10 +3,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.core.config import settings
 from backend.app.api.v1.router import api_router
-from backend.app.db.session import engine, Base
+from backend.app.db.session import engine, SessionLocal, Base
+from backend.app.db.init_db import init_db
 
-# Création automatique des tables au démarrage si absentes
+# Création automatique des tables et initialisation du seed BTS au démarrage
 Base.metadata.create_all(bind=engine)
+try:
+    with SessionLocal() as _startup_db:
+        init_db(_startup_db)
+except Exception:
+    pass
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

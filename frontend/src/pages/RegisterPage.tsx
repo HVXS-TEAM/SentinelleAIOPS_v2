@@ -209,9 +209,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
           <div className="w-20 h-20 rounded-2xl bg-[#0b0f11] border border-[#00f2c3]/40 overflow-hidden relative shadow-[0_0_20px_rgba(0,242,195,0.25)] flex items-center justify-center p-2">
             <img
               src="/sentinelle_logo.png"
-              alt="Sentinelle AIOps Logo"
+              alt="Sentinelle AIOps"
               className="w-full h-full object-contain scale-110 drop-shadow-[0_0_8px_rgba(0,242,195,0.4)]"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
             />
+            <Icon name="shield" size="xl" className="text-[#00f2c3] absolute -z-10" />
           </div>
         </div>
 

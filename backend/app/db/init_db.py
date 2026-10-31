@@ -7,45 +7,69 @@ from backend.app.db.models import (
     User, Equipement, Metrique, Prediction,
     EvenementSecurite, AuditReseau, SauvegardeConfig, Alerte, JournalAudit
 )
-from backend.app.core.security import get_password_hash, encrypt_secret
+from backend.app.core.security import get_password_hash, verify_password, encrypt_secret
 
 
 def init_db(db: Session) -> None:
-    """Crée les tables et injecte les données réalistes du laboratoire BTS."""
+    """Crée les tables, garantit l'intégrité des comptes démo et injecte les données du lab BTS."""
     Base.metadata.create_all(bind=engine)
 
-    # 1. Comptes utilisateurs de test
-    if not db.query(User).filter(User.identifiant == "admin").first():
-        users = [
-            User(
-                identifiant="admin",
-                email="admin@sentinelle.local",
-                nom_complet="Administrateur Sécurité & Réseau",
-                hash_mot_de_passe=get_password_hash("AdminPassword2026!"),
-                role="Administrateur",
-                mfa_active=False,
-                est_actif=True,
-            ),
-            User(
-                identifiant="tech",
-                email="technicien@sentinelle.local",
-                nom_complet="Technicien Support N2",
-                hash_mot_de_passe=get_password_hash("TechPassword2026!"),
-                role="Technicien",
-                mfa_active=False,
-                est_actif=True,
-            ),
-            User(
-                identifiant="visiteur",
-                email="visiteur@sentinelle.local",
-                nom_complet="Auditeur Externe / Jury",
-                hash_mot_de_passe=get_password_hash("VisiteurPassword2026!"),
-                role="Visiteur",
-                mfa_active=False,
-                est_actif=True,
-            ),
-        ]
-        db.add_all(users)
+    # 1. Comptes utilisateurs de démonstration (vérification et auto-réparation individuelle)
+    demo_accounts = [
+        {
+            "identifiant": "admin",
+            "email": "admin@sentinelle.local",
+            "nom_complet": "Administrateur Sécurité & Réseau",
+            "password": "AdminPassword2026!",
+            "role": "Administrateur",
+        },
+        {
+            "identifiant": "tech",
+            "email": "technicien@sentinelle.local",
+            "nom_complet": "Technicien Support N2",
+            "password": "TechPassword2026!",
+            "role": "Technicien",
+        },
+        {
+            "identifiant": "visiteur",
+            "email": "visiteur@sentinelle.local",
+            "nom_complet": "Auditeur Externe / Jury",
+            "password": "VisiteurPassword2026!",
+            "role": "Visiteur",
+        },
+    ]
+
+    users_modified = False
+    for acc in demo_accounts:
+        existing_user = db.query(User).filter(User.identifiant == acc["identifiant"]).first()
+        if not existing_user:
+            db.add(
+                User(
+                    identifiant=acc["identifiant"],
+                    email=acc["email"],
+                    nom_complet=acc["nom_complet"],
+                    hash_mot_de_passe=get_password_hash(acc["password"]),
+                    role=acc["role"],
+                    mfa_active=False,
+                    est_actif=True,
+                    tentatives_echouees=0,
+                    bloque_jusqu_a=None,
+                )
+            )
+            users_modified = True
+        else:
+            if not existing_user.est_actif:
+                existing_user.est_actif = True
+                users_modified = True
+            if existing_user.tentatives_echouees or existing_user.bloque_jusqu_a is not None:
+                existing_user.tentatives_echouees = 0
+                existing_user.bloque_jusqu_a = None
+                users_modified = True
+            if not verify_password(acc["password"], existing_user.hash_mot_de_passe):
+                existing_user.hash_mot_de_passe = get_password_hash(acc["password"])
+                users_modified = True
+
+    if users_modified:
         db.commit()
 
     # 2. Équipements du parc du lab BTS

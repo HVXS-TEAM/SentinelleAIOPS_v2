@@ -23,11 +23,13 @@ from typing import Any
 import httpx
 import yaml
 
+from backend.app.core.config import DATA_DIR, CIS_RULES_PATH, CONFIG_BACKUP_DIR
+
 # ── Chemins ──────────────────────────────────────────────────────────────────
 
-_BASE_DIR = Path(__file__).resolve().parents[4]  # racine projet
-_CIS_RULES_PATH = _BASE_DIR / "backend" / "config" / "cis_rules.yaml"
-_BACKUP_DIR = _BASE_DIR / "backend" / "data" / "config_backups"
+_BASE_DIR = DATA_DIR
+_CIS_RULES_PATH = CIS_RULES_PATH
+_BACKUP_DIR = CONFIG_BACKUP_DIR
 _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Configs Cisco IOS simulées ────────────────────────────────────────────────
