@@ -44,14 +44,14 @@ RequestExecutionLevel user
 !insertmacro MUI_LANGUAGE "English"
 
 ; ── Informations de Version pour Windows Explorer ───────────────────────────
-VIProductVersion "2.4.1.0"
+VIProductVersion "2.5.0.0"
 VIAddVersionKey "ProductName" "Sentinelle AIOps"
-VIAddVersionKey "Comments" "Plateforme Centralisée d'Administration Réseau, Télémétrie & IA"
+VIAddVersionKey "Comments" "Plateforme Centralisée d'Administration Réseau, Télémétrie & IA (Lanceur Dédié SOC)"
 VIAddVersionKey "CompanyName" "Sentinelle AIOps"
 VIAddVersionKey "LegalCopyright" "© 2026 Sentinelle AIOps. Tous droits réservés."
-VIAddVersionKey "FileDescription" "Programme d'installation Sentinelle AIOps"
-VIAddVersionKey "FileVersion" "2.4.1.0"
-VIAddVersionKey "ProductVersion" "2.4.1.0"
+VIAddVersionKey "FileDescription" "Programme d'installation Sentinelle AIOps (Édition SOC)"
+VIAddVersionKey "FileVersion" "2.5.0.0"
+VIAddVersionKey "ProductVersion" "2.5.0.0"
 
 ; ── Section d'Installation ──────────────────────────────────────────────────
 Section "Sentinelle AIOps (Requis)" SecCore
@@ -82,7 +82,7 @@ Section "Sentinelle AIOps (Requis)" SecCore
     ; ── Enregistrement dans les Applications Installées Windows (Panneau de config)
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "DisplayName" "Sentinelle AIOps"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "DisplayIcon" "$INSTDIR\sentinelle.ico,0"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "DisplayVersion" "2.4.1"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "DisplayVersion" "2.5.0"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "Publisher" "Sentinelle AIOps Team"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "UninstallString" '"$INSTDIR\Uninstall.exe"'
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sentinelle AIOps" "InstallLocation" "$INSTDIR"
@@ -109,6 +109,8 @@ Section "Uninstall"
     Delete "$INSTDIR\sentinelle.db"
     Delete "$INSTDIR\sentinelle.db-wal"
     Delete "$INSTDIR\sentinelle.db-shm"
+    Delete "$INSTDIR\sentinelle_runtime.log"
+    RMDir /r "$INSTDIR\app_profile"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"
 

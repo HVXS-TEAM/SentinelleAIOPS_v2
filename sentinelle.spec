@@ -13,8 +13,15 @@ datas = [
     (str(ROOT_DIR / "backend" / "config" / "cis_rules.yaml"), "backend/config"),
     (str(ROOT_DIR / "sentinelle.ico"), "."),
 ]
+if (ROOT_DIR / "Documentation" / "sentinelle_logo.png").exists():
+    datas.append((str(ROOT_DIR / "Documentation" / "sentinelle_logo.png"), "Documentation"))
 
 hiddenimports = [
+    "PyQt6",
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.QtWidgets",
+    "PyQt6.sip",
     "uvicorn",
     "uvicorn.logging",
     "uvicorn.loops",
@@ -87,7 +94,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
