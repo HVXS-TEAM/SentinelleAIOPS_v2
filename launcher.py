@@ -11,7 +11,9 @@ Ce script est le point d'entrée pour le packaging PyInstaller (.exe) et le Setu
 
 from __future__ import annotations
 
+import multiprocessing
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -21,6 +23,18 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Optional
+
+# Protection globale immédiate sous Windows contre l'ouverture de fenêtres de terminal (conhost.exe)
+if platform.system() == "Windows" and not getattr(subprocess.Popen, "_sentinelle_no_window_patched", False):
+    _orig_popen_init = subprocess.Popen.__init__
+    _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+    def _silent_popen_init(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _silent_popen_init  # type: ignore[method-assign]
+    subprocess.Popen._sentinelle_no_window_patched = True  # type: ignore[attr-defined]
 
 # ── 1. Résolution des chemins (Mode compilé PyInstaller vs Développement) ─────
 if getattr(sys, "frozen", False):
@@ -686,4 +700,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

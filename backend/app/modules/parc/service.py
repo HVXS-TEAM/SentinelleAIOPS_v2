@@ -264,13 +264,26 @@ class ParcService:
         elif "/" in ip_prefix:
             ip_prefix = ip_prefix.split("/")[0].rsplit(".", 1)[0]
 
-        # 1. Balayage ping multithreadé rapide pour peupler/rafraîchir la table ARP
+        # 1. Balayage ping multithreadé rapide pour peupler/rafraîchir la table ARP (100% silencieux sans fenêtre console)
+        no_window_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if platform.system() == "Windows" else 0
+
+        def _make_hidden_startupinfo():
+            if platform.system() == "Windows" and hasattr(subprocess, "STARTUPINFO"):
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                return si
+            return None
+
         def _quick_ping(target_ip: str):
             try:
                 subprocess.run(
                     ["ping", "-n", "1", "-w", "150", target_ip],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=no_window_flags,
+                    startupinfo=_make_hidden_startupinfo(),
                 )
             except Exception:
                 pass
@@ -288,10 +301,16 @@ class ParcService:
         with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
             executor.map(_quick_ping, unique_ips_to_ping)
 
-        # 2. Lecture de la table ARP Windows
+        # 2. Lecture de la table ARP Windows (sans shell=True ni fenêtre cmd.exe)
         arp_entries: Dict[str, str] = {}
         try:
-            raw_arp = subprocess.check_output("arp -a", shell=True).decode("cp850", errors="ignore")
+            raw_arp = subprocess.check_output(
+                ["arp", "-a"],
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=no_window_flags,
+                startupinfo=_make_hidden_startupinfo(),
+            ).decode("cp850", errors="ignore")
             for line in raw_arp.splitlines():
                 line = line.strip()
                 # Exemple : 192.168.0.1  c8-2a-f2-0f-a1-2a  dynamique

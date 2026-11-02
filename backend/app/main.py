@@ -1,10 +1,25 @@
 """Sentinelle AIOps — Backend API Server (FastAPI)."""
+import platform
+import subprocess
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.core.config import settings
 from backend.app.api.v1.router import api_router
 from backend.app.db.session import engine, SessionLocal, Base
 from backend.app.db.init_db import init_db
+
+# Protection globale Windows : empêcher toute ouverture de fenêtre console (conhost/cmd)
+# par les sous-processus système ou bibliothèques tierces (joblib, sklearn, psutil, ping, arp)
+if platform.system() == "Windows" and not getattr(subprocess.Popen, "_sentinelle_no_window_patched", False):
+    _orig_popen_init = subprocess.Popen.__init__
+    _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+    def _silent_popen_init(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _silent_popen_init  # type: ignore[method-assign]
+    subprocess.Popen._sentinelle_no_window_patched = True  # type: ignore[attr-defined]
 
 # Création automatique des tables et initialisation du seed BTS au démarrage
 Base.metadata.create_all(bind=engine)
