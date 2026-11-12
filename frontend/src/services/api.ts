@@ -1,6 +1,15 @@
 import axios from 'axios';
-import type { AuthResponse, RegisterData, Equipement, MetricSeries, Prediction, LocalNetworkInfo, RealNetworkScanResponse } from '../types';
-
+import type {
+  AuthResponse,
+  RegisterData,
+  Equipement,
+  MetricSeries,
+  Prediction,
+  Alerte,
+  LocalNetworkInfo,
+  RealNetworkScanResponse,
+  HardwareLiveStats,
+} from '../types';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
@@ -92,11 +101,11 @@ export const authService = {
   },
 };
 
-// Services de supervision prédictive
+// Services de supervision prédictive et cycle de vie des alertes
 export const supervisionService = {
-  getMetrics: async (equipementId: number, typeMetrique = 'disk_percent'): Promise<MetricSeries> => {
+  getMetrics: async (equipementId: number, typeMetrique = 'disk_percent', limit = 48): Promise<MetricSeries> => {
     const response = await apiClient.get<MetricSeries>(`/supervision/metrics/${equipementId}`, {
-      params: { type_metrique: typeMetrique, limit: 48 },
+      params: { type_metrique: typeMetrique, limit },
     });
     return response.data;
   },
@@ -124,8 +133,26 @@ export const supervisionService = {
     });
     return response.data;
   },
-  getHardwareLive: async () => {
-    const response = await apiClient.get<import('../types').HardwareLiveStats>('/supervision/hardware/live');
+  getHardwareLive: async (): Promise<HardwareLiveStats> => {
+    const response = await apiClient.get<HardwareLiveStats>('/supervision/hardware/live');
+    return response.data;
+  },
+  getAlerts: async (statut?: string, limit = 100): Promise<Alerte[]> => {
+    const response = await apiClient.get<Alerte[]>('/supervision/alerts', {
+      params: { ...(statut ? { statut } : {}), limit },
+    });
+    return response.data;
+  },
+  acknowledgeAlert: async (alerteId: number): Promise<Alerte> => {
+    const response = await apiClient.put<Alerte>(`/supervision/alerts/${alerteId}/acknowledge`);
+    return response.data;
+  },
+  resolveAlert: async (alerteId: number): Promise<Alerte> => {
+    const response = await apiClient.put<Alerte>(`/supervision/alerts/${alerteId}/resolve`);
+    return response.data;
+  },
+  probeAll: async (): Promise<{ total: number; online: number; offline: number }> => {
+    const response = await apiClient.post('/supervision/probe-all');
     return response.data;
   },
 };
@@ -138,8 +165,29 @@ export const parcService = {
     });
     return response.data;
   },
-  getEquipementDetail: async (equipementId: number) => {
-    const response = await apiClient.get(`/parc/equipements/${equipementId}`);
+  getEquipementDetail: async (equipementId: number): Promise<Equipement> => {
+    const response = await apiClient.get<Equipement>(`/parc/equipements/${equipementId}`);
+    return response.data;
+  },
+  updateEquipement: async (
+    equipementId: number,
+    data: {
+      nom?: string;
+      ip?: string;
+      mac?: string;
+      type?: string;
+      os?: string;
+      firmware?: string;
+      groupe?: string;
+      seuil_disque_alerte?: number;
+      mot_de_passe_secret?: string;
+    },
+  ): Promise<Equipement> => {
+    const response = await apiClient.put<Equipement>(`/parc/equipements/${equipementId}`, data);
+    return response.data;
+  },
+  probeEquipement: async (equipementId: number): Promise<Equipement> => {
+    const response = await apiClient.post<Equipement>(`/parc/equipements/${equipementId}/probe`);
     return response.data;
   },
   scanSnmp: async (plageIp = '192.168.1.0/24', simulerRogue = false) => {
@@ -192,8 +240,6 @@ export const parcService = {
     const response = await apiClient.post('/parc/ssh/execute', params);
     return response.data;
   },
-
-
   exportCsv: async () => {
     const response = await apiClient.get('/parc/export-csv', { responseType: 'blob' });
     const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -243,9 +289,30 @@ export const securiteService = {
     });
     return response.data;
   },
+  scanRealSecurity: async (equipementId?: number) => {
+    const response = await apiClient.post('/securite/scan-real', null, {
+      params: equipementId ? { equipement_id: equipementId } : {},
+    });
+    return response.data;
+  },
+  blockIp: async (ip: string, equipementId?: number, reason = 'Blocage manuel opérateur SOC') => {
+    const response = await apiClient.post('/securite/block-ip', {
+      ip,
+      equipement_id: equipementId,
+      reason,
+    });
+    return response.data;
+  },
+  isolateDevice: async (equipementId: number, reason = 'Isolation préventive suite à anomalie critique') => {
+    const response = await apiClient.post('/securite/isolate-device', {
+      equipement_id: equipementId,
+      reason,
+    });
+    return response.data;
+  },
 };
 
-// Services NetDevOps – Audit CIS, Backup & Diff de configuration
+// Services NetDevOps – Audit CIS, Backup, Diff, Remédiation & Restauration
 export const netdevopsService = {
   getDevices: async () => {
     const response = await apiClient.get('/netdevops/devices');
@@ -265,12 +332,29 @@ export const netdevopsService = {
     });
     return response.data;
   },
+  remediate: async (deviceId: string, remediationSnippet: string, ruleId?: string) => {
+    const response = await apiClient.post(`/netdevops/remediate/${deviceId}`, {
+      remediation_snippet: remediationSnippet,
+      rule_id: ruleId,
+    });
+    return response.data;
+  },
+  restoreBackup: async (deviceId: string, backupIndex = 0) => {
+    const response = await apiClient.post(`/netdevops/restore/${deviceId}`, {
+      backup_index: backupIndex,
+    });
+    return response.data;
+  },
 };
 
 // Services Dashboard Global AIOps
 export const dashboardService = {
   getSummary: async () => {
     const response = await apiClient.get('/dashboard/summary');
+    return response.data;
+  },
+  refreshSummary: async () => {
+    const response = await apiClient.post('/dashboard/refresh');
     return response.data;
   },
 };
@@ -325,6 +409,10 @@ export const adminService = {
     const response = await apiClient.post(`/admin/pra/verify/${filename}`);
     return response.data;
   },
+  restorePraBackup: async (filename: string) => {
+    const response = await apiClient.post(`/admin/pra/restore/${filename}`);
+    return response.data;
+  },
   getPraMetrics: async () => {
     const response = await apiClient.get('/admin/pra/metrics');
     return response.data;
@@ -343,6 +431,26 @@ export const adminService = {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
+  },
+  getNotificationConfig: async () => {
+    const response = await apiClient.get('/admin/notifications/config');
+    return response.data;
+  },
+  saveNotificationConfig: async (payload: {
+    demo_mode: boolean;
+    telegram_enabled: boolean;
+    telegram_token: string;
+    telegram_chat_id: string;
+    discord_enabled: boolean;
+    discord_webhook: string;
+    email_enabled: boolean;
+    smtp_server: string;
+    smtp_port: number;
+    email_recipient: string;
+    email_use_tls?: boolean;
+  }) => {
+    const response = await apiClient.put('/admin/notifications/config', payload);
+    return response.data;
   },
   testNotificationChannel: async (payload: {
     channel: 'telegram' | 'discord' | 'email';
@@ -366,8 +474,8 @@ export const adminService = {
     const response = await apiClient.post('/admin/notifications/dispatch', payload);
     return response.data;
   },
+  switchToRealNetworkOnly: async () => {
+    const response = await apiClient.post('/admin/environment/real-only');
+    return response.data;
+  },
 };
-
-
-
-

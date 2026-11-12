@@ -60,6 +60,11 @@ hiddenimports = [
     "paramiko.ed25519key",
     "paramiko.ecdsakey",
     "paramiko.dsskey",
+    "apscheduler",
+    "apscheduler.schedulers.background",
+    "apscheduler.triggers.interval",
+    "apscheduler.executors.pool",
+    "apscheduler.jobstores.memory",
 ]
 
 a = Analysis(

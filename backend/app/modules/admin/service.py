@@ -4,28 +4,40 @@ Service d'Administration, RBAC et Plan de Reprise d'Activité (PRA) – Bloc 8.
 Responsabilités :
   - Gestion des utilisateurs et rôles (RBAC)
   - Consultation et archivage du Journal d'Audit inaltérable
-  - Exécution et vérification cryptographique des sauvegardes PRA (SHA-256)
-  - Calcul des métriques de continuité d'activité (RTO / RPO)
+  - Exécution, vérification cryptographique (SHA-256) et restauration des sauvegardes PRA
+  - Persistance sécurisée (Fernet) de la configuration de notifications
+  - Bascule en mode 100 % Réseau Physique Réel (purge des équipements de laboratoire)
 """
 
 from __future__ import annotations
 
-import os
+import hashlib
+import json
 import shutil
 import sqlite3
-import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import settings, DATA_DIR, DB_FILE_PATH, BACKUP_DIR as CFG_BACKUP_DIR
-from backend.app.core.security import get_password_hash
-from backend.app.db.models import User, JournalAudit
+from backend.app.core.config import BACKUP_DIR as CFG_BACKUP_DIR, DATA_DIR, DB_FILE_PATH
+from backend.app.core.security import decrypt_secret, encrypt_secret, get_password_hash
+from backend.app.db.models import (
+    Alerte,
+    AuditReseau,
+    Equipement,
+    JournalAudit,
+    Metrique,
+    Prediction,
+    SauvegardeConfig,
+    User,
+)
 
 BASE_DIR = DATA_DIR
 DB_PATH = DB_FILE_PATH
 BACKUP_DIR = CFG_BACKUP_DIR
+NOTIFICATION_CONFIG_PATH = DATA_DIR / "notification_settings.json"
 
 
 def _record_audit(
@@ -36,7 +48,11 @@ def _record_audit(
     username: str = "Système",
     details: str | None = None,
 ) -> None:
-    """Enregistre une action d'administration de manière inaltérable."""
+    """
+    Rôle : Enregistre une action d'administration de manière inaltérable dans le journal d'audit.
+    Entrées : db, action, target, user_id, username, details.
+    Sorties : Aucune.
+    """
     entry = JournalAudit(
         utilisateur_id=user_id,
         nom_utilisateur=username,
@@ -49,9 +65,12 @@ def _record_audit(
     db.commit()
 
 
-
 def _calculate_sha256(filepath: Path) -> str:
-    """Calcule l'empreinte SHA-256 d'un fichier binaire."""
+    """
+    Rôle : Calcule l'empreinte SHA-256 d'un fichier binaire par blocs de 8 Ko.
+    Entrées : filepath (Path).
+    Sorties : Empreinte hexadécimale SHA-256 (str).
+    """
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
         while chunk := f.read(8192):
@@ -64,7 +83,11 @@ class AdminService:
 
     @staticmethod
     def list_users(db: Session) -> list[dict[str, Any]]:
-        """Retourne la liste des comptes utilisateurs avec leurs statuts et rôles."""
+        """
+        Rôle : Retourne la liste des comptes utilisateurs avec leurs statuts et rôles.
+        Entrées : db (Session SQLAlchemy).
+        Sorties : Liste de dictionnaires utilisateurs.
+        """
         users = db.query(User).order_by(User.id.asc()).all()
         return [
             {
@@ -92,7 +115,12 @@ class AdminService:
         role: str = "Technicien",
         current_admin_user: str = "admin",
     ) -> dict[str, Any]:
-        """Crée un nouvel utilisateur avec mot de passe haché par bcrypt."""
+        """
+        Rôle : Crée un nouvel utilisateur avec mot de passe haché par bcrypt.
+        Entrées : db, identifiant, email, nom_complet, mot_de_passe, role, current_admin_user.
+        Sorties : Dictionnaire du compte créé.
+        Cas d'erreur : ValueError si l'identifiant ou l'email existe déjà.
+        """
         existing = db.query(User).filter((User.identifiant == identifiant) | (User.email == email)).first()
         if existing:
             raise ValueError("Un utilisateur avec cet identifiant ou cet email existe déjà.")
@@ -110,7 +138,6 @@ class AdminService:
         db.commit()
         db.refresh(new_user)
 
-        # Enregistrement dans le journal d'audit
         _record_audit(
             db,
             user_id=new_user.id,
@@ -130,7 +157,12 @@ class AdminService:
 
     @staticmethod
     def toggle_user_status(db: Session, user_id: int, current_admin_user: str = "admin") -> dict[str, Any]:
-        """Active ou désactive un compte utilisateur."""
+        """
+        Rôle : Active ou désactive un compte utilisateur.
+        Entrées : db, user_id, current_admin_user.
+        Sorties : Statut mis à jour.
+        Cas d'erreur : ValueError si l'utilisateur est introuvable.
+        """
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise ValueError(f"Utilisateur #{user_id} introuvable.")
@@ -159,7 +191,11 @@ class AdminService:
         action: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Récupère l'historique inaltérable des actions d'administration et d'exploitation."""
+        """
+        Rôle : Récupère l'historique inaltérable des actions d'administration et d'exploitation.
+        Entrées : db, limit, action (filtre), search (recherche plein texte).
+        Sorties : Liste des entrées d'audit.
+        """
         query = db.query(JournalAudit)
         if action:
             query = query.filter(JournalAudit.action == action)
@@ -189,7 +225,12 @@ class AdminService:
 
     @staticmethod
     def trigger_pra_backup(db: Session, triggered_by: str = "admin") -> dict[str, Any]:
-        """Exécute une sauvegarde à chaud de la base de données SQLite avec empreinte SHA-256."""
+        """
+        Rôle : Exécute une sauvegarde à chaud de la base de données SQLite avec empreinte SHA-256.
+        Entrées : db, triggered_by.
+        Sorties : Métadonnées du fichier de sauvegarde généré.
+        Cas d'erreur : FileNotFoundError si la base source n'existe pas.
+        """
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         if not DB_PATH.exists():
             raise FileNotFoundError(f"Base de données source introuvable : {DB_PATH}")
@@ -198,7 +239,6 @@ class AdminService:
         backup_filename = f"sentinelle_backup_{ts_str}.db"
         backup_file = BACKUP_DIR / backup_filename
 
-        # Sauvegarde à chaud atomique via l'API native SQLite (compatible mode WAL)
         try:
             with sqlite3.connect(str(DB_PATH)) as src_conn, sqlite3.connect(str(backup_file)) as dst_conn:
                 src_conn.backup(dst_conn)
@@ -211,7 +251,6 @@ class AdminService:
 
         file_size_kb = round(backup_file.stat().st_size / 1024, 2)
 
-        # Enregistrement dans le journal d'audit
         _record_audit(
             db,
             user_id=None,
@@ -231,7 +270,11 @@ class AdminService:
 
     @staticmethod
     def list_pra_backups() -> list[dict[str, Any]]:
-        """Liste l'ensemble des fichiers de sauvegarde avec statut de vérification SHA-256."""
+        """
+        Rôle : Liste l'ensemble des fichiers de sauvegarde avec statut de vérification SHA-256.
+        Entrées : Aucune.
+        Sorties : Liste des sauvegardes triées de la plus récente à la plus ancienne.
+        """
         if not BACKUP_DIR.exists():
             return []
 
@@ -258,15 +301,22 @@ class AdminService:
 
     @staticmethod
     def verify_backup_integrity(filename: str) -> dict[str, Any]:
-        """Vérifie l'intégrité cryptographique d'un fichier de sauvegarde spécifique."""
-        target_file = BACKUP_DIR / filename
+        """
+        Rôle : Vérifie l'intégrité cryptographique d'un fichier de sauvegarde spécifique.
+        Entrées : filename (str).
+        Sorties : Résultat de vérification SHA-256.
+        Cas d'erreur : FileNotFoundError si le fichier n'existe pas.
+        """
+        # Sécurité : empêcher toute traversée de répertoire (Path Traversal)
+        clean_name = Path(filename).name
+        target_file = BACKUP_DIR / clean_name
         if not target_file.exists():
-            raise FileNotFoundError(f"Fichier de sauvegarde '{filename}' introuvable.")
+            raise FileNotFoundError(f"Fichier de sauvegarde '{clean_name}' introuvable.")
 
         hash_file = target_file.with_suffix(".sha256")
         if not hash_file.exists():
             return {
-                "filename": filename,
+                "filename": clean_name,
                 "is_valid": False,
                 "error": "Fichier d'empreinte SHA-256 manquant.",
             }
@@ -276,22 +326,67 @@ class AdminService:
 
         is_valid = expected_sha == actual_sha
         return {
-            "filename": filename,
+            "filename": clean_name,
             "is_valid": is_valid,
             "expected_sha256": expected_sha,
             "actual_sha256": actual_sha,
-            "message": "Empreinte cryptographique conforme. Intégrité validée." if is_valid else "CORRUPTION : empreinte invalide !",
+            "message": "Empreinte cryptographique conforme. Intégrité validée."
+            if is_valid
+            else "CORRUPTION : empreinte invalide !",
+        }
+
+    @staticmethod
+    def restore_pra_backup(db: Session, filename: str, triggered_by: str = "admin") -> dict[str, Any]:
+        """
+        Rôle : Restaure à chaud une sauvegarde SQLite après contrôle strict de son empreinte SHA-256.
+        Entrées : db, filename, triggered_by.
+        Sorties : Statut de restauration PRA.
+        Cas d'erreur : FileNotFoundError si fichier absent, ValueError si l'intégrité SHA-256 échoue.
+        """
+        clean_name = Path(filename).name
+        verification = AdminService.verify_backup_integrity(clean_name)
+        if not verification.get("is_valid"):
+            raise ValueError(
+                f"Restauration refusée : l'intégrité SHA-256 de '{clean_name}' est invalide ({verification.get('message')})."
+            )
+
+        target_file = BACKUP_DIR / clean_name
+
+        # Restauration atomique via l'API native SQLite backup
+        try:
+            with sqlite3.connect(str(target_file)) as src_conn, sqlite3.connect(str(DB_PATH)) as dst_conn:
+                src_conn.backup(dst_conn)
+        except Exception as exc:
+            raise RuntimeError(f"Échec de la restauration atomique SQLite : {exc}") from exc
+
+        _record_audit(
+            db,
+            user_id=None,
+            username=triggered_by,
+            action="PRA_BACKUP_RESTORE",
+            target=clean_name,
+            details=f"Restauration PRA complète validée (SHA-256: {verification['actual_sha256'][:16]}...)",
+        )
+
+        return {
+            "status": "RESTORED",
+            "filename": clean_name,
+            "sha256": verification["actual_sha256"],
+            "restored_at": datetime.now(timezone.utc).isoformat(),
+            "message": f"Base de données restaurée avec succès depuis '{clean_name}'.",
         }
 
     @staticmethod
     def get_pra_metrics() -> dict[str, Any]:
-        """Fournit les métriques de continuité d'activité (RTO, RPO, état PRA)."""
+        """
+        Rôle : Fournit les métriques de continuité d'activité (RTO, RPO, état PRA).
+        Entrées : Aucune.
+        Sorties : Dictionnaire des indicateurs PRA.
+        """
         backups = AdminService.list_pra_backups()
         total_backups = len(backups)
         last_backup = backups[0]["date_creation"] if backups else None
 
-        # RTO cible : < 5 minutes (Restauration automatisée SQLite)
-        # RPO cible : < 24 heures (Planification quotidienne)
         return {
             "rto_cible_minutes": 5,
             "rto_estime_secondes": 3.5,
@@ -301,4 +396,150 @@ class AdminService:
             "derniere_sauvegarde": last_backup,
             "chiffrement": "Fernet AES-256",
             "controle_integrite": "SHA-256",
+        }
+
+    # ── Persistance des Configurations de Notification ────────────────────────
+
+    @staticmethod
+    def get_notification_settings() -> dict[str, Any]:
+        """
+        Rôle : Charge la configuration persistante des canaux d'alerte (déchiffre les secrets Fernet).
+        Entrées : Aucune.
+        Sorties : Dictionnaire de configuration des notifications.
+        """
+        defaults = {
+            "demo_mode": False,
+            "telegram_enabled": False,
+            "telegram_token": "",
+            "telegram_chat_id": "",
+            "discord_enabled": False,
+            "discord_webhook": "",
+            "email_enabled": True,
+            "smtp_server": "smtp.gmail.com",
+            "smtp_port": 587,
+            "email_recipient": "admin@sentinelle.local",
+            "email_use_tls": True,
+        }
+        if not NOTIFICATION_CONFIG_PATH.exists():
+            return defaults
+
+        try:
+            raw = json.loads(NOTIFICATION_CONFIG_PATH.read_text(encoding="utf-8"))
+            if raw.get("telegram_token_enc"):
+                try:
+                    raw["telegram_token"] = decrypt_secret(raw["telegram_token_enc"])
+                except Exception:
+                    raw["telegram_token"] = ""
+            if raw.get("discord_webhook_enc"):
+                try:
+                    raw["discord_webhook"] = decrypt_secret(raw["discord_webhook_enc"])
+                except Exception:
+                    raw["discord_webhook"] = ""
+            defaults.update({k: v for k, v in raw.items() if k in defaults})
+        except Exception:
+            pass
+        return defaults
+
+    @staticmethod
+    def save_notification_settings(
+        db: Session,
+        payload: dict[str, Any],
+        triggered_by: str = "admin",
+    ) -> dict[str, Any]:
+        """
+        Rôle : Sauvegarde la configuration des notifications sur disque en chiffrant les tokens sensibles via Fernet.
+        Entrées : db, payload, triggered_by.
+        Sorties : Configuration sauvegardée.
+        """
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        stored = {
+            "demo_mode": bool(payload.get("demo_mode", False)),
+            "telegram_enabled": bool(payload.get("telegram_enabled", False)),
+            "telegram_token_enc": encrypt_secret(payload["telegram_token"]) if payload.get("telegram_token") else "",
+            "telegram_chat_id": str(payload.get("telegram_chat_id", "")),
+            "discord_enabled": bool(payload.get("discord_enabled", False)),
+            "discord_webhook_enc": encrypt_secret(payload["discord_webhook"]) if payload.get("discord_webhook") else "",
+            "email_enabled": bool(payload.get("email_enabled", True)),
+            "smtp_server": str(payload.get("smtp_server", "smtp.gmail.com")),
+            "smtp_port": int(payload.get("smtp_port", 587)),
+            "email_recipient": str(payload.get("email_recipient", "admin@sentinelle.local")),
+            "email_use_tls": bool(payload.get("email_use_tls", True)),
+        }
+        NOTIFICATION_CONFIG_PATH.write_text(json.dumps(stored, indent=2), encoding="utf-8")
+
+        _record_audit(
+            db,
+            user_id=None,
+            username=triggered_by,
+            action="NOTIFICATION_CONFIG_SAVE",
+            target="Canaux d'alerte",
+            details=f"Configuration sauvegardée (Mode Réel={not stored['demo_mode']}, Telegram={stored['telegram_enabled']}, Discord={stored['discord_enabled']}, Email={stored['email_enabled']})",
+        )
+        return AdminService.get_notification_settings()
+
+    # ── Bascule Mode 100 % Réseau Physique Réel ───────────────────────────────
+
+    @staticmethod
+    def reset_to_real_network_only(db: Session, triggered_by: str = "admin") -> dict[str, Any]:
+        """
+        Rôle : Purge les équipements fictifs de démonstration (SW-CORE-01, RTR-EDGE-01, SRV-APP-01, SRV-DB-01, ROGUE-PI-01),
+        conserve/enregistre la machine hôte réelle, scanne le réseau local (ARP/Ping/Ports) et importe la passerelle
+        et les hôtes physiques détectés.
+        Entrées : db, triggered_by.
+        Sorties : Bilan de la bascule en mode 100 % réel.
+        """
+        from backend.app.modules.parc.service import ParcService
+        from backend.app.modules.supervision.hardware_collector import HardwareCollector
+
+        demo_names = {"SW-CORE-01", "RTR-EDGE-01", "SRV-APP-01", "SRV-DB-01", "ROGUE-PI-01"}
+        demo_ips = {"192.168.1.254", "192.168.1.1", "192.168.1.10", "192.168.1.11", "192.168.1.99"}
+
+        # Identifier la vraie passerelle du réseau local pour ne pas la supprimer si elle est en 192.168.1.1 / .254
+        real_scan = ParcService.scan_real_network()
+        real_discovered_ips = {d["ip"] for d in real_scan}
+
+        removed_names: list[str] = []
+        all_eqs = db.query(Equipement).all()
+        for eq in all_eqs:
+            is_demo_name = eq.nom in demo_names
+            is_demo_ip_not_real = (eq.ip in demo_ips) and (eq.ip not in real_discovered_ips)
+            if is_demo_name or is_demo_ip_not_real:
+                removed_names.append(f"{eq.nom} ({eq.ip})")
+                db.query(Metrique).filter(Metrique.equipement_id == eq.id).delete()
+                db.query(Prediction).filter(Prediction.equipement_id == eq.id).delete()
+                db.query(Alerte).filter(Alerte.equipement_id == eq.id).delete()
+                db.query(AuditReseau).filter(AuditReseau.equipement_id == eq.id).delete()
+                db.query(SauvegardeConfig).filter(SauvegardeConfig.equipement_id == eq.id).delete()
+                db.delete(eq)
+
+        db.commit()
+
+        # Enregistrer et sonder la machine hôte locale
+        HardwareCollector.collect_live_metrics(db)
+
+        # Importer automatiquement les vrais équipements découverts sur le LAN (passerelle, etc.)
+        imported_count = 0
+        if real_scan:
+            import_res = ParcService.import_real_devices(db, real_scan, None)
+            imported_count = import_res.get("imported", 0)
+
+        # Sonder tous les équipements réels présents
+        probe_res = ParcService.probe_all_equipments(db)
+
+        _record_audit(
+            db,
+            user_id=None,
+            username=triggered_by,
+            action="ENV_SWITCH_REAL_NETWORK",
+            target="Parc & Topologie",
+            details=f"Purge de {len(removed_names)} équipements démo ({', '.join(removed_names) or 'aucun'}), {imported_count} équipements physiques importés.",
+        )
+
+        return {
+            "status": "REAL_NETWORK_ACTIVE",
+            "removed_demo_equipments": removed_names,
+            "discovered_lan_devices": len(real_scan),
+            "imported_lan_devices": imported_count,
+            "total_active_equipments": probe_res.get("total", 0),
+            "online_equipments": probe_res.get("online", 0),
         }

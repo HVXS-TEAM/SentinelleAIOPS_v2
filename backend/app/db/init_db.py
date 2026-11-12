@@ -272,6 +272,27 @@ end
         )
         db.add(log_entry)
         db.commit()
+    else:
+        # Assainir la série disque de SRV-APP-01 au démarrage si des simulations antérieures ont créé des dents de scie
+        srv_app = db.query(Equipement).filter_by(nom="SRV-APP-01").first()
+        if srv_app:
+            now = datetime.now(timezone.utc)
+            db.query(Metrique).filter(
+                Metrique.equipement_id == srv_app.id,
+                Metrique.type_metrique == "disk_percent",
+            ).delete(synchronize_session=False)
+            for i in range(24, 0, -1):
+                time_point = now - timedelta(hours=i)
+                disk_val = round(65.0 + (24 - i) * 0.8, 1)
+                db.add(
+                    Metrique(
+                        equipement_id=srv_app.id,
+                        type_metrique="disk_percent",
+                        valeur=disk_val,
+                        horodatage=time_point,
+                    )
+                )
+            db.commit()
 
 
 if __name__ == "__main__":

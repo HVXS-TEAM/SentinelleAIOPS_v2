@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Icon } from '../components/ui/Icon';
 import {
   ResponsiveContainer,
@@ -14,20 +14,28 @@ import {
 } from 'recharts';
 import { dashboardService, parcService, supervisionService } from '../services/api';
 
-/* ── Données télémétriques conformes à screen.png ────────────────────────── */
-const TELEMETRY_DATA = [
-  { day: 'J-7',          cpu: 38, ram: 48, pred: null },
-  { day: 'J-5',          cpu: 45, ram: 54, pred: null },
-  { day: 'J-3',          cpu: 39, ram: 42, pred: null },
-  { day: 'Hier',         cpu: 62, ram: 50, pred: null },
-  { day: "Aujourd'hui",  cpu: 74, ram: 61, pred: 74   },
-  { day: 'J+1',          cpu: null, ram: null, pred: 76 },
-  { day: 'J+3',          cpu: null, ram: null, pred: 69 },
+/* ── Point télémétrique pour le graphique principal ───────────────────────── */
+interface TelemetryPoint {
+  day: string;
+  cpu: number | null;
+  ram: number | null;
+  pred: number | null;
+}
+
+const DEFAULT_TELEMETRY_DATA: TelemetryPoint[] = [
+  { day: 'T-6',          cpu: 24, ram: 42, pred: null },
+  { day: 'T-4',          cpu: 28, ram: 44, pred: null },
+  { day: 'T-2',          cpu: 26, ram: 43, pred: null },
+  { day: 'T-1',          cpu: 31, ram: 45, pred: null },
+  { day: 'Maintenant',   cpu: 33, ram: 46, pred: 33   },
+  { day: '+2h (Préd.)',  cpu: null, ram: null, pred: 35 },
+  { day: '+6h (Préd.)',  cpu: null, ram: null, pred: 38 },
 ];
 
 /* ── Équipements critiques du tableau ────────────────────────────────────── */
 interface EquipmentRow {
   id: string;
+  dbId?: number;
   nom: string;
   type: string;
   ip: string;
@@ -36,59 +44,9 @@ interface EquipmentRow {
   tendance: 'up' | 'stable' | 'down';
   cpu: number;
   ram: number;
+  disk: number;
   uptime: string;
 }
-
-const CRITICAL_EQUIPMENTS: EquipmentRow[] = [
-  {
-    id: 'eq-1',
-    nom: 'Switch-Core-01',
-    type: 'Switch',
-    ip: '10.0.1.1',
-    statusColor: '#ffb4ab',
-    statusText: 'Critique',
-    tendance: 'up',
-    cpu: 98,
-    ram: 84,
-    uptime: '142j 11h',
-  },
-  {
-    id: 'eq-2',
-    nom: 'Firewall-Edge',
-    type: 'Firewall',
-    ip: '192.168.1.254',
-    statusColor: '#ffb4ab',
-    statusText: 'Alerte',
-    tendance: 'up',
-    cpu: 89,
-    ram: 91,
-    uptime: '89j 04h',
-  },
-  {
-    id: 'eq-3',
-    nom: 'Srv-DB-Cluster-03',
-    type: 'Serveur',
-    ip: '10.0.2.15',
-    statusColor: '#f97316',
-    statusText: 'Attention',
-    tendance: 'stable',
-    cpu: 76,
-    ram: 82,
-    uptime: '210j 18h',
-  },
-  {
-    id: 'eq-4',
-    nom: 'Switch-Distribution-A',
-    type: 'Switch',
-    ip: '10.0.1.10',
-    statusColor: '#78d8ba',
-    statusText: 'Normal',
-    tendance: 'down',
-    cpu: 42,
-    ram: 45,
-    uptime: '302j 01h',
-  },
-];
 
 interface DonutSlice {
   name: string;
@@ -101,7 +59,7 @@ interface DashboardProps {
 }
 
 export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
-  const [period, setPeriod] = useState('7 DERNIERS JOURS');
+  const [period, setPeriod] = useState('TEMPS RÉEL & PRÉDICTION');
   const [selectedEquipment, setSelectedEquipment] = useState<EquipmentRow | null>(null);
   const [showActionDrawer, setShowActionDrawer] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -112,138 +70,184 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
   const [predictedIncidents, setPredictedIncidents] = useState<number>(0);
   const [cisCompliance, setCisCompliance] = useState<number>(88);
 
+  const [telemetryData, setTelemetryData] = useState<TelemetryPoint[]>(DEFAULT_TELEMETRY_DATA);
   const [donutData, setDonutData] = useState<DonutSlice[]>([
     { name: 'Switchs & Routeurs', value: 0, color: '#78d8ba' },
-    { name: 'Serveurs & VM',      value: 0, color: '#81d0f8' },
+    { name: 'Serveurs & Hôtes',   value: 0, color: '#81d0f8' },
     { name: 'Pare-feux & Sécu',   value: 0, color: '#f59e0b' },
   ]);
 
-  const [criticalEquipmentsList, setCriticalEquipmentsList] = useState<EquipmentRow[]>(CRITICAL_EQUIPMENTS);
+  const [criticalEquipmentsList, setCriticalEquipmentsList] = useState<EquipmentRow[]>([]);
   const [recentAlertsList, setRecentAlertsList] = useState<any[]>([]);
-
-  useEffect(() => {
-    let isMounted = true;
-    Promise.all([
-      dashboardService.getSummary(),
-      parcService.getEquipements(),
-    ])
-      .then(([data, eqs]) => {
-        if (!isMounted) return;
-        if (data?.kpis) {
-          if (typeof data.kpis.total_equipements === 'number') {
-            setMonitoredCount(data.kpis.total_equipements);
-          }
-          if (typeof data.kpis.alertes_critiques === 'number') {
-            setCriticalAlertsCount(data.kpis.alertes_critiques);
-          }
-          if (typeof data.kpis.sante_moyenne === 'number') {
-            setAvgHealth(data.kpis.sante_moyenne);
-          }
-          if (typeof data.kpis.ttf_imminents === 'number') {
-            setPredictedIncidents(data.kpis.ttf_imminents);
-          }
-          if (typeof data.kpis.cis_conformite_moyenne === 'number') {
-            setCisCompliance(Math.round(data.kpis.cis_conformite_moyenne));
-          }
-        }
-        if (data?.recent_alertes) {
-          setRecentAlertsList(data.recent_alertes);
-        }
-        if (eqs && eqs.length > 0) {
-          if (!data?.kpis?.total_equipements) {
-            setMonitoredCount(eqs.length);
-          }
-
-          // Répartition dynamique des types d'équipements réels
-          let switchs = 0;
-          let servers = 0;
-          let firewalls = 0;
-          let others = 0;
-
-          eqs.forEach((eq: any) => {
-            const t = (eq.type || '').toLowerCase();
-            if (t.includes('switch') || t.includes('routeur')) {
-              switchs++;
-            } else if (t.includes('serveur') || t.includes('linux') || t.includes('vm')) {
-              servers++;
-            } else if (t.includes('firewall') || t.includes('pare-feu') || t.includes('sécu')) {
-              firewalls++;
-            } else {
-              others++;
-            }
-          });
-
-          const dynamicDonut: DonutSlice[] = [
-            { name: 'Switchs & Routeurs', value: switchs, color: '#78d8ba' },
-            { name: 'Serveurs & VM',      value: servers, color: '#81d0f8' },
-            { name: 'Pare-feux & Sécu',   value: firewalls, color: '#f59e0b' },
-          ];
-          if (others > 0) {
-            dynamicDonut.push({ name: 'Autres équipements', value: others, color: '#3e4945' });
-          }
-          setDonutData(dynamicDonut);
-
-          const mappedRows: EquipmentRow[] = eqs.slice(0, 6).map((eq, i) => {
-            const isCrit = eq.score_sante < 50 || eq.statut_collecte !== 'OK';
-            const isWarn = eq.score_sante < 80;
-            const statusColor = isCrit ? '#ffb4ab' : isWarn ? '#f97316' : '#78d8ba';
-            const statusText = isCrit ? 'Critique' : isWarn ? 'Attention' : 'Normal';
-            const days = Math.floor(eq.uptime_secondes / 86400);
-            const hours = Math.floor((eq.uptime_secondes % 86400) / 3600);
-            return {
-              id: `eq-${eq.id || i}`,
-              nom: eq.nom,
-              type: eq.type,
-              ip: eq.ip,
-              statusColor,
-              statusText,
-              tendance: isCrit ? 'up' : isWarn ? 'stable' : 'down',
-              cpu: Math.max(10, Math.min(99, Math.round(100 - eq.score_sante + 30))),
-              ram: Math.max(15, Math.min(98, Math.round(100 - eq.score_sante + 40))),
-              uptime: `${days}j ${String(hours).padStart(2, '0')}h`,
-            };
-          });
-          setCriticalEquipmentsList(mappedRows);
-        }
-      })
-      .catch(() => {
-        // Mode hors ligne préservé
-      });
-    return () => { isMounted = false; };
-  }, []);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const handlePeriodToggle = () => {
-    const options = ['24 HEURES', '7 DERNIERS JOURS', '30 JOURS'];
+  /**
+   * Rôle : Charge et synchronise l'ensemble des métriques réelles depuis le backend SQLite/psutil.
+   */
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const [data, eqs] = await Promise.all([
+        dashboardService.getSummary(),
+        parcService.getEquipements(),
+      ]);
+
+      if (data?.kpis) {
+        if (typeof data.kpis.total_equipements === 'number') {
+          setMonitoredCount(data.kpis.total_equipements);
+        }
+        if (typeof data.kpis.alertes_critiques === 'number') {
+          setCriticalAlertsCount(data.kpis.alertes_critiques);
+        }
+        if (typeof data.kpis.sante_moyenne === 'number') {
+          setAvgHealth(data.kpis.sante_moyenne);
+        }
+        if (typeof data.kpis.ttf_imminents === 'number') {
+          setPredictedIncidents(data.kpis.ttf_imminents);
+        }
+        if (typeof data.kpis.cis_conformite_moyenne === 'number') {
+          setCisCompliance(Math.round(data.kpis.cis_conformite_moyenne));
+        }
+      }
+
+      const alertsFromApi = data?.alertes_recentes || data?.recent_alertes;
+      if (Array.isArray(alertsFromApi)) {
+        setRecentAlertsList(alertsFromApi.filter((a: any) => a.statut !== 'Résolue'));
+      }
+
+      if (Array.isArray(data?.telemetry_series) && data.telemetry_series.length > 0) {
+        const mappedSeries: TelemetryPoint[] = data.telemetry_series.map((pt: any) => ({
+          day: pt.time,
+          cpu: typeof pt.cpu_actual === 'number' ? pt.cpu_actual : pt.actual ?? null,
+          ram: typeof pt.ram_actual === 'number' ? pt.ram_actual : null,
+          pred: typeof pt.cpu_predicted === 'number' ? pt.cpu_predicted : pt.predicted ?? null,
+        }));
+        setTelemetryData(mappedSeries);
+      }
+
+      if (eqs && eqs.length > 0) {
+        if (!data?.kpis?.total_equipements) {
+          setMonitoredCount(eqs.length);
+        }
+
+        let switchs = 0;
+        let servers = 0;
+        let firewalls = 0;
+        let others = 0;
+
+        eqs.forEach((eq: any) => {
+          const t = (eq.type || '').toLowerCase();
+          if (t.includes('switch') || t.includes('routeur') || t.includes('passerelle')) {
+            switchs++;
+          } else if (t.includes('serveur') || t.includes('hôte') || t.includes('linux') || t.includes('windows') || t.includes('vm')) {
+            servers++;
+          } else if (t.includes('firewall') || t.includes('pare-feu') || t.includes('sécu')) {
+            firewalls++;
+          } else {
+            others++;
+          }
+        });
+
+        const dynamicDonut: DonutSlice[] = [
+          { name: 'Switchs & Routeurs', value: switchs, color: '#78d8ba' },
+          { name: 'Serveurs & Hôtes',   value: servers, color: '#81d0f8' },
+          { name: 'Pare-feux & Sécu',   value: firewalls, color: '#f59e0b' },
+        ];
+        if (others > 0) {
+          dynamicDonut.push({ name: 'Autres équipements', value: others, color: '#3e4945' });
+        }
+        setDonutData(dynamicDonut);
+
+        // Tri par criticité (équipements en alerte ou santé la plus basse en premier)
+        const sortedEqs = [...eqs].sort((a, b) => a.score_sante - b.score_sante);
+        const mappedRows: EquipmentRow[] = sortedEqs.slice(0, 6).map((eq, i) => {
+          const isCrit = eq.score_sante < 50 || eq.statut_collecte !== 'OK';
+          const isWarn = eq.score_sante < 80;
+          const statusColor = isCrit ? '#ffb4ab' : isWarn ? '#f97316' : '#78d8ba';
+          const statusText = eq.statut_collecte !== 'OK' ? 'Injoignable' : isCrit ? 'Critique' : isWarn ? 'Attention' : 'Normal';
+          const days = Math.floor((eq.uptime_secondes || 0) / 86400);
+          const hours = Math.floor(((eq.uptime_secondes || 0) % 86400) / 3600);
+
+          const realCpu = typeof eq.cpu_percent === 'number' ? Math.round(eq.cpu_percent) : 0;
+          const realRam = typeof eq.ram_percent === 'number' ? Math.round(eq.ram_percent) : 0;
+          const realDisk = typeof eq.disk_percent === 'number' ? Math.round(eq.disk_percent) : 0;
+
+          // Calcul de tendance basé sur l'historique réel CPU si disponible
+          let tendance: 'up' | 'stable' | 'down' = 'stable';
+          if (Array.isArray(eq.cpu_history) && eq.cpu_history.length >= 2) {
+            const diff = eq.cpu_history[eq.cpu_history.length - 1] - eq.cpu_history[0];
+            if (diff > 3) tendance = 'up';
+            else if (diff < -3) tendance = 'down';
+          }
+
+          return {
+            id: `eq-${eq.id || i}`,
+            dbId: eq.id,
+            nom: eq.nom,
+            type: eq.type,
+            ip: eq.ip,
+            statusColor,
+            statusText,
+            tendance,
+            cpu: realCpu,
+            ram: realRam,
+            disk: realDisk,
+            uptime: `${days}j ${String(hours).padStart(2, '0')}h`,
+          };
+        });
+        setCriticalEquipmentsList(mappedRows);
+      }
+    } catch {
+      // Conservation de l'état courant en cas d'erreur réseau transitoire
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+    const interval = setInterval(loadDashboardData, 15000);
+    return () => clearInterval(interval);
+  }, [loadDashboardData]);
+
+  const handlePeriodToggle = async () => {
+    const options = ['TEMPS RÉEL & PRÉDICTION', '24 HEURES', '7 DERNIERS JOURS'];
     const next = (options.indexOf(period) + 1) % options.length;
     setPeriod(options[next]);
-    showToast(`Période ajustée : ${options[next]}`);
+    showToast(`Synchronisation télémétrique (${options[next]})...`);
+    await dashboardService.refreshSummary().catch(() => {});
+    await loadDashboardData();
   };
 
   const handleScanGlobal = async () => {
-    showToast('Scan SNMP du réseau lancé sur l\'infrastructure...');
+    showToast('Sondage actif (ICMP/TCP/SSH) et scan réseau physique en cours...');
     setShowActionDrawer(false);
     try {
-      const res = await parcService.scanSnmp('192.168.1.0/24', false);
-      showToast(`Scan SNMP terminé : ${res?.equipements_trouves ?? 4} équipements vérifiés.`);
+      const [scanRes, probeRes] = await Promise.all([
+        parcService.scanRealNetwork(),
+        supervisionService.probeAll(),
+      ]);
+      await loadDashboardData();
+      showToast(
+        `Scan terminé : ${scanRes?.devices_count ?? 0} hôtes LAN détectés, ${probeRes?.online ?? 0}/${probeRes?.total ?? 0} équipements en ligne.`
+      );
     } catch {
-      showToast('Scan SNMP exécuté avec succès : 4 équipements découverts.');
+      showToast('Erreur lors du scan réseau.');
     }
   };
 
   const handleRecalculatePredictions = async () => {
-    showToast('Recalcul des Time-To-Failure et modèles de prédiction...');
+    showToast('Collecte live et recalcul des Time-To-Failure (régression linéaire)...');
     setShowActionDrawer(false);
     try {
+      await dashboardService.refreshSummary();
       await parcService.recalculateScores();
       const preds = await supervisionService.getPredictions();
-      showToast(`Prédictions actualisées : ${preds?.length ?? 3} séries temporelles synchronisées.`);
+      await loadDashboardData();
+      showToast(`Prédictions actualisées : ${preds?.length ?? 0} séries temporelles recalculées.`);
     } catch {
-      showToast('Prédictions IA synchronisées avec succès.');
+      showToast('Erreur lors du recalcul des prédictions.');
     }
   };
 
@@ -254,7 +258,29 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
       await parcService.exportCsv();
       showToast('Fichier inventaire_parc_sentinelle.csv téléchargé avec succès !');
     } catch {
-      showToast('Export d\'inventaire généré avec succès.');
+      showToast('Erreur lors de l\'export CSV.');
+    }
+  };
+
+  const handleAcknowledgeAlert = async (e: React.MouseEvent, alertId: number) => {
+    e.stopPropagation();
+    try {
+      await supervisionService.acknowledgeAlert(alertId);
+      showToast(`Alerte #${alertId} acquittée.`);
+      await loadDashboardData();
+    } catch {
+      showToast(`Impossible d'acquitter l'alerte #${alertId}.`);
+    }
+  };
+
+  const handleResolveAlert = async (e: React.MouseEvent, alertId: number) => {
+    e.stopPropagation();
+    try {
+      await supervisionService.resolveAlert(alertId);
+      showToast(`Alerte #${alertId} résolue et archivée.`);
+      await loadDashboardData();
+    } catch {
+      showToast(`Impossible de résoudre l'alerte #${alertId}.`);
     }
   };
 
@@ -275,7 +301,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             Dashboard Opérationnel
           </h1>
           <p className="text-sm text-[#87938e] mt-0.5">
-            Vue d'ensemble de l'infrastructure AIOps
+            Vue d'ensemble temps réel de l'infrastructure AIOps
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -284,7 +310,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             onClick={handlePeriodToggle}
             className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-[#3e4945] bg-[#1d2022] text-xs font-mono text-[#e0e3e6] hover:bg-[#272a2d] transition-colors"
           >
-            <Icon name="calendar_today" size="xs" className="text-[#87938e]" />
+            <Icon name="sync" size="xs" className="text-[#78d8ba]" />
             {period}
           </button>
           <button
@@ -312,7 +338,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             {monitoredCount.toLocaleString('fr-FR')}
           </div>
           <div className="text-xs font-mono text-[#78d8ba] mt-2 flex items-center gap-1">
-            <Icon name="trending_up" size="xs" /> +2.4%
+            <Icon name="sensors" size="xs" /> Sondes actives
           </div>
         </div>
 
@@ -329,7 +355,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             {criticalAlertsCount}
           </div>
           <div className="text-xs font-mono text-[#bdc9c3] mt-2">
-            Action requise
+            {criticalAlertsCount > 0 ? 'Action requise' : 'Nominal'}
           </div>
         </div>
 
@@ -342,7 +368,6 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             <div className="text-3xl font-bold font-mono text-[#78d8ba]">
               {avgHealth}%
             </div>
-            {/* Sparkline verte fidèle à la maquette */}
             <svg className="w-16 h-8 text-[#78d8ba]" viewBox="0 0 60 25" fill="none">
               <path
                 d="M 2 20 Q 15 5, 25 18 T 45 10 T 58 8"
@@ -399,7 +424,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
           <div className="bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs font-mono font-semibold tracking-wider text-[#e0e3e6] uppercase">
-                TENDANCES RESSOURCES &amp; PRÉDICTIONS IA
+                TENDANCES RESSOURCES RÉELLES &amp; PRÉDICTIONS IA
               </h2>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <span className="flex items-center gap-1.5 text-[#bdc9c3]">
@@ -416,7 +441,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
 
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={TELEMETRY_DATA} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
+                <LineChart data={telemetryData} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#272a2d" vertical={false} />
                   <XAxis
                     dataKey="day"
@@ -429,10 +454,9 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                         x={x}
                         y={Number(y) + 12}
                         textAnchor="middle"
-                        fill={payload.value === "Aujourd'hui" ? '#78d8ba' : '#87938e'}
-                        fontSize={11}
+                        fill={String(payload.value).includes('Préd') ? '#81d0f8' : '#87938e'}
+                        fontSize={10}
                         fontFamily="JetBrains Mono"
-                        fontWeight={payload.value === "Aujourd'hui" ? 'bold' : 'normal'}
                       >
                         {payload.value}
                       </text>
@@ -461,6 +485,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   <Line
                     type="monotone"
                     dataKey="cpu"
+                    name="CPU Réel (%)"
                     stroke="#78d8ba"
                     strokeWidth={2.5}
                     dot={{ r: 3, fill: '#78d8ba' }}
@@ -470,6 +495,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   <Line
                     type="monotone"
                     dataKey="ram"
+                    name="RAM Réelle (%)"
                     stroke="#81d0f8"
                     strokeWidth={2}
                     dot={{ r: 3, fill: '#81d0f8' }}
@@ -479,6 +505,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   <Line
                     type="monotone"
                     dataKey="pred"
+                    name="Projection IA (%)"
                     stroke="#78d8ba"
                     strokeWidth={2}
                     strokeDasharray="4 4"
@@ -490,11 +517,11 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             </div>
           </div>
 
-          {/* Bloc Statut des Équipements Critiques (Tableau interactif) */}
+          {/* Bloc Statut des Équipements (Tableau interactif avec vraies métriques) */}
           <div className="bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs font-mono font-semibold tracking-wider text-[#e0e3e6] uppercase">
-                STATUT DES ÉQUIPEMENTS CRITIQUES
+                STATUT DES ÉQUIPEMENTS SUPERVISÉS
               </h2>
               <button
                 onClick={() => onNavigateTab?.('parc')}
@@ -511,8 +538,9 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                     <th className="pb-3 pl-2">STATUT</th>
                     <th className="pb-3">ÉQUIPEMENT</th>
                     <th className="pb-3">TYPE</th>
-                    <th className="pb-3">IP / LOCALISATION</th>
-                    <th className="pb-3 text-right pr-2">TENDANCE (1H)</th>
+                    <th className="pb-3">IP</th>
+                    <th className="pb-3">CPU / RAM / DISQUE</th>
+                    <th className="pb-3 text-right pr-2">TENDANCE</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#272a2d]/50 text-xs font-mono">
@@ -526,6 +554,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                         <span
                           className="w-2.5 h-2.5 rounded-full inline-block"
                           style={{ backgroundColor: eq.statusColor }}
+                          title={eq.statusText}
                         />
                       </td>
                       <td className="py-3.5 font-bold text-[#e0e3e6] group-hover:text-[#78d8ba] transition-colors">
@@ -533,17 +562,24 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                       </td>
                       <td className="py-3.5 text-[#bdc9c3]">{eq.type}</td>
                       <td className="py-3.5 text-[#87938e]">{eq.ip}</td>
+                      <td className="py-3.5 text-[#bdc9c3]">
+                        <span className={eq.cpu > 80 ? 'text-[#ffb4ab] font-bold' : 'text-[#78d8ba]'}>{eq.cpu}%</span>
+                        {' / '}
+                        <span className="text-[#81d0f8]">{eq.ram}%</span>
+                        {' / '}
+                        <span className={eq.disk > 85 ? 'text-[#ffb4ab] font-bold' : 'text-[#bdc9c3]'}>{eq.disk}%</span>
+                      </td>
                       <td className="py-3.5 text-right pr-2">
                         {eq.tendance === 'up' ? (
                           <span className="text-[#ffb4ab] inline-flex items-center gap-1 font-bold">
-                            &uarr; +4.2%
+                            &uarr; Hausse
                           </span>
                         ) : eq.tendance === 'down' ? (
                           <span className="text-[#78d8ba] inline-flex items-center gap-1">
-                            &darr; -1.1%
+                            &darr; Baisse
                           </span>
                         ) : (
-                          <span className="text-[#87938e]">~ stable</span>
+                          <span className="text-[#87938e]">~ Stable</span>
                         )}
                       </td>
                     </tr>
@@ -563,12 +599,14 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                 <h2 className="text-xs font-mono font-semibold tracking-wider text-[#e0e3e6] uppercase">
                   FLUX D'ALERTES ACTIVES
                 </h2>
-                <Icon name="filter_list" size="sm" className="text-[#87938e] cursor-pointer hover:text-[#e0e3e6]" />
+                <span className="text-[10px] font-mono text-[#78d8ba] bg-[#78d8ba]/10 px-2 py-0.5 rounded">
+                  {recentAlertsList.length} en cours
+                </span>
               </div>
 
               <div className="space-y-3">
                 {recentAlertsList.length > 0 ? (
-                  recentAlertsList.slice(0, 3).map((al: any) => {
+                  recentAlertsList.slice(0, 4).map((al: any) => {
                     const isCrit = al.severite === 'CRITICAL';
                     const targetTab = al.module_origine === 'Sécurité' ? 'securite' : al.module_origine === 'NetDevOps' ? 'netdevops' : 'supervision';
                     return (
@@ -583,7 +621,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                           <span className={`${
                             isCrit ? 'bg-[#ffb4ab]/15 text-[#ffb4ab]' : 'bg-orange-500/15 text-orange-400'
                           } px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider`}>
-                            {al.severite}
+                            {al.severite} • {al.statut}
                           </span>
                           <span className="text-[10px] font-mono text-[#87938e]">
                             {al.equipement_nom || 'Système'}
@@ -595,10 +633,28 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                         <p className="text-[11px] text-[#87938e] mt-1 line-clamp-2">
                           {al.message}
                         </p>
-                        <div className="mt-2.5">
+                        <div className="mt-2.5 flex items-center justify-between gap-2">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#1d2022] border border-[#272a2d] text-[10px] font-mono text-[#bdc9c3]">
                             <Icon name="monitoring" size="xs" className="text-[#78d8ba]" /> {al.module_origine}
                           </span>
+                          <div className="flex items-center gap-1.5">
+                            {al.statut === 'Active' && (
+                              <button
+                                onClick={(e) => handleAcknowledgeAlert(e, al.id)}
+                                className="px-2 py-0.5 rounded bg-[#272a2d] hover:bg-[#3e4945] text-[10px] font-mono text-[#81d0f8] transition-colors"
+                                title="Acquitter l'alerte"
+                              >
+                                Acquitter
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => handleResolveAlert(e, al.id)}
+                              className="px-2 py-0.5 rounded bg-[#78d8ba]/15 hover:bg-[#78d8ba]/30 text-[10px] font-mono text-[#78d8ba] transition-colors"
+                              title="Marquer comme résolue"
+                            >
+                              Résoudre
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -652,7 +708,6 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              {/* Centre du Donut fidèle à la maquette */}
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <span className="text-2xl font-bold font-mono text-[#e0e3e6]">
                   {monitoredCount}
@@ -663,7 +718,6 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
               </div>
             </div>
 
-            {/* Légende du Donut */}
             <div className="space-y-2 mt-2 pt-3 border-t border-[#272a2d] text-xs font-mono">
               {donutData.map(d => (
                 <div key={d.name} className="flex items-center justify-between">
@@ -679,7 +733,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
         </div>
       </div>
 
-      {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Fiche Équipement ─────────── */}
+      {/* ── TIROIR LATÉRAL : Fiche Équipement ────────────────────────────────── */}
       {selectedEquipment && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
@@ -714,21 +768,25 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                     <span className="text-[#e0e3e6]">{selectedEquipment.type}</span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-[#87938e]">Statut sonde:</span>
+                    <span className="text-[#78d8ba]">{selectedEquipment.statusText}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-[#87938e]">Uptime:</span>
                     <span className="text-[#78d8ba]">{selectedEquipment.uptime}</span>
                   </div>
                 </div>
 
                 <div className="p-3 bg-[#1d2022] rounded-lg border border-[#272a2d] space-y-2.5">
-                  <div className="text-[10px] text-[#87938e] uppercase">Métriques de charge</div>
+                  <div className="text-[10px] text-[#87938e] uppercase">Métriques réelles collectées</div>
                   <div>
                     <div className="flex justify-between text-[11px] mb-1">
                       <span className="text-[#87938e]">Utilisation CPU:</span>
-                      <span className="font-bold text-[#ffb4ab]">{selectedEquipment.cpu}%</span>
+                      <span className="font-bold text-[#78d8ba]">{selectedEquipment.cpu}%</span>
                     </div>
                     <div className="w-full bg-[#0b0f11] h-2 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-[#ef4444]"
+                        className="h-full bg-[#78d8ba]"
                         style={{ width: `${selectedEquipment.cpu}%` }}
                       />
                     </div>
@@ -745,28 +803,55 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                       />
                     </div>
                   </div>
+                  <div>
+                    <div className="flex justify-between text-[11px] mb-1">
+                      <span className="text-[#87938e]">Utilisation Disque:</span>
+                      <span className="font-bold text-[#f59e0b]">{selectedEquipment.disk}%</span>
+                    </div>
+                    <div className="w-full bg-[#0b0f11] h-2 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#f59e0b]"
+                        style={{ width: `${selectedEquipment.disk}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="p-3 bg-[#1d2022] rounded-lg border border-[#272a2d] space-y-2">
-                  <div className="text-[10px] text-[#87938e] uppercase">Actions recommandées</div>
-                  <p className="text-[11px] text-[#bdc9c3]">
-                    Processus de purge automatique des logs recommandé pour libérer le CPU.
-                  </p>
-                </div>
+                {selectedEquipment.dbId && (
+                  <button
+                    onClick={async () => {
+                      if (!selectedEquipment.dbId) return;
+                      showToast(`Sondage actif de ${selectedEquipment.nom} (${selectedEquipment.ip})...`);
+                      const updated = await parcService.probeEquipement(selectedEquipment.dbId);
+                      setSelectedEquipment({
+                        ...selectedEquipment,
+                        cpu: Math.round(updated.cpu_percent ?? selectedEquipment.cpu),
+                        ram: Math.round(updated.ram_percent ?? selectedEquipment.ram),
+                        disk: Math.round(updated.disk_percent ?? selectedEquipment.disk),
+                        statusText: updated.statut_collecte === 'OK' ? 'Normal' : 'Injoignable',
+                      });
+                      await loadDashboardData();
+                      showToast(`Sonde ${selectedEquipment.nom} actualisée (${updated.statut_collecte}).`);
+                    }}
+                    className="w-full py-2 rounded-lg bg-[#1d2022] hover:bg-[#272a2d] border border-[#78d8ba]/40 text-[#78d8ba] font-mono text-xs flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Icon name="radar" size="sm" />
+                    Sonder cet équipement maintenant (ICMP / TCP / SSH)
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="pt-6 border-t border-[#272a2d] flex gap-2">
               <button
                 onClick={() => {
-                  showToast(`Session SSH initiée vers ${selectedEquipment.ip}`);
                   setSelectedEquipment(null);
                   onNavigateTab?.('parc');
                 }}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#78d8ba] text-[#00382b] font-mono font-bold text-xs hover:bg-[#68c8aa] transition-colors"
               >
                 <Icon name="terminal" size="sm" />
-                Session SSH (Parc)
+                Ouvrir dans Parc &amp; SSH
               </button>
               <button
                 onClick={() => setSelectedEquipment(null)}
@@ -779,7 +864,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
         </div>
       )}
 
-      {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Actions rapides ──────────── */}
+      {/* ── TIROIR LATÉRAL : Actions rapides ─────────────────────────────────── */}
       {showActionDrawer && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
@@ -804,10 +889,10 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                 >
                   <div>
                     <div className="font-bold text-[#e0e3e6] group-hover:text-[#78d8ba]">
-                      Lancer Scan Global
+                      Lancer Scan Réel &amp; Sondage Global
                     </div>
                     <div className="text-[11px] text-[#87938e] mt-1">
-                      Découverte SNMP et audit de santé complet
+                      Découverte ARP/ICMP/TCP et sondage de tous les nœuds
                     </div>
                   </div>
                   <Icon name="open_in_new" size="sm" className="text-[#87938e] group-hover:text-[#78d8ba]" />
@@ -820,10 +905,10 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                 >
                   <div>
                     <div className="font-bold text-[#e0e3e6] group-hover:text-[#78d8ba]">
-                      Recalculer Prédictions IA
+                      Recalculer Prédictions IA (TTF)
                     </div>
                     <div className="text-[11px] text-[#87938e] mt-1">
-                      Exécution de la régression linéaire sur 7 jours
+                      Collecte matérielle live et régression linéaire
                     </div>
                   </div>
                   <Icon name="open_in_new" size="sm" className="text-[#87938e] group-hover:text-[#78d8ba]" />

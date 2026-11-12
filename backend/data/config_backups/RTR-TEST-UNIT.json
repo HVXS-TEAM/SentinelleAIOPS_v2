@@ -1,42 +1,82 @@
 [
   {
-    "ts": "2026-10-25T03:45:49.745099+00:00",
+    "ts": "2026-11-12T02:42:33.218452+00:00",
+    "sha256": "2d17b3f5bff1bf704b8c915027841712a89b1205143c4f6b08dba90c2b2a3557",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   },
   {
-    "ts": "2026-10-25T03:45:49.744232+00:00",
+    "ts": "2026-11-12T02:42:33.216207+00:00",
+    "sha256": "df4f60d74c219241232c12586228022eb00cd885756339a1ae238c89879362b8",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\n"
   },
   {
-    "ts": "2026-10-25T03:26:45.293266+00:00",
+    "ts": "2026-11-11T20:21:04.257595+00:00",
+    "sha256": "2d17b3f5bff1bf704b8c915027841712a89b1205143c4f6b08dba90c2b2a3557",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   },
   {
-    "ts": "2026-10-25T03:26:45.291905+00:00",
+    "ts": "2026-11-11T20:21:04.255451+00:00",
+    "sha256": "df4f60d74c219241232c12586228022eb00cd885756339a1ae238c89879362b8",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\n"
   },
   {
-    "ts": "2026-10-25T03:20:47.118979+00:00",
+    "ts": "2026-11-10T22:13:35.743103+00:00",
+    "sha256": "2d17b3f5bff1bf704b8c915027841712a89b1205143c4f6b08dba90c2b2a3557",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   },
   {
-    "ts": "2026-10-25T03:20:47.117838+00:00",
+    "ts": "2026-11-10T22:13:35.740686+00:00",
+    "sha256": "df4f60d74c219241232c12586228022eb00cd885756339a1ae238c89879362b8",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\n"
   },
   {
-    "ts": "2026-10-25T02:55:24.307988+00:00",
+    "ts": "2026-11-10T22:10:30.203879+00:00",
+    "sha256": "2d17b3f5bff1bf704b8c915027841712a89b1205143c4f6b08dba90c2b2a3557",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   },
   {
-    "ts": "2026-10-25T02:55:24.306545+00:00",
+    "ts": "2026-11-10T22:10:30.200831+00:00",
+    "sha256": "df4f60d74c219241232c12586228022eb00cd885756339a1ae238c89879362b8",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\n"
   },
   {
-    "ts": "2026-10-25T02:18:05.227370+00:00",
+    "ts": "2026-11-10T22:03:23.828424+00:00",
+    "sha256": "2d17b3f5bff1bf704b8c915027841712a89b1205143c4f6b08dba90c2b2a3557",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   },
   {
-    "ts": "2026-10-25T02:18:05.226333+00:00",
+    "ts": "2026-11-10T22:03:23.824212+00:00",
+    "sha256": "df4f60d74c219241232c12586228022eb00cd885756339a1ae238c89879362b8",
+    "comment": "Audit automatique CIS",
     "config": "hostname RTR-TEST\nservice password-encryption\n"
+  },
+  {
+    "ts": "2026-10-31T19:24:16.460473+00:00",
+    "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
+  },
+  {
+    "ts": "2026-10-31T19:24:16.459310+00:00",
+    "config": "hostname RTR-TEST\nservice password-encryption\n"
+  },
+  {
+    "ts": "2026-10-31T16:04:41.482984+00:00",
+    "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
+  },
+  {
+    "ts": "2026-10-31T16:04:41.481613+00:00",
+    "config": "hostname RTR-TEST\nservice password-encryption\n"
+  },
+  {
+    "ts": "2026-10-28T05:55:08.434025+00:00",
+    "config": "hostname RTR-TEST\nservice password-encryption\nip ssh version 2\n"
   }
 ]

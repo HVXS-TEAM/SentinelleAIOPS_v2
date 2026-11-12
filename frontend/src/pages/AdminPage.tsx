@@ -138,11 +138,15 @@ export const AdminPage: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
 
-  /* États notifications */
-  const [demoMode, setDemoMode] = useState<boolean>(true); // Actif par défaut pour sécuriser les démonstrations
+  /* États notifications (Mode Réel par défaut) */
+  const [demoMode, setDemoMode] = useState<boolean>(false);
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [telegramEnabled, setTelegramEnabled] = useState(true);
   const [discordEnabled, setDiscordEnabled] = useState(false);
+
+  /* Sauvegardes PRA SQLite et bascule Réseau Réel */
+  const [praBackups, setPraBackups] = useState<any[]>([]);
+  const [isSwitchingReal, setIsSwitchingReal] = useState(false);
 
   /* Téléchargement */
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -345,10 +349,89 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  const fetchPraBackups = async () => {
+    try {
+      const list = await adminService.listPraBackups();
+      if (Array.isArray(list)) {
+        setPraBackups(list);
+      }
+    } catch {
+      // Tolérance
+    }
+  };
+
+  const fetchNotificationSettings = async () => {
+    try {
+      const cfg = await adminService.getNotificationConfig();
+      if (cfg) {
+        setDemoMode(Boolean(cfg.demo_mode));
+        setEmailEnabled(Boolean(cfg.email_enabled));
+        setTelegramEnabled(Boolean(cfg.telegram_enabled));
+        setDiscordEnabled(Boolean(cfg.discord_enabled));
+        if (cfg.telegram_token || cfg.telegram_chat_id) {
+          setTelegramConfig({
+            botToken: cfg.telegram_token || '',
+            chatId: cfg.telegram_chat_id || '',
+          });
+        }
+        if (cfg.discord_webhook) {
+          setDiscordConfig({ webhookUrl: cfg.discord_webhook });
+        }
+        if (cfg.smtp_server || cfg.email_recipient) {
+          setEmailConfig({
+            smtpServer: cfg.smtp_server || 'smtp.gmail.com',
+            smtpPort: String(cfg.smtp_port || 587),
+            recipient: cfg.email_recipient || 'admin@sentinelle.local',
+          });
+        }
+      }
+    } catch {
+      // Tolérance
+    }
+  };
+
+  const persistNotificationSettings = async (overrideDemo?: boolean) => {
+    try {
+      await adminService.saveNotificationConfig({
+        demo_mode: overrideDemo !== undefined ? overrideDemo : demoMode,
+        telegram_enabled: telegramEnabled,
+        telegram_token: telegramConfig.botToken,
+        telegram_chat_id: telegramConfig.chatId,
+        discord_enabled: discordEnabled,
+        discord_webhook: discordConfig.webhookUrl,
+        email_enabled: emailEnabled,
+        smtp_server: emailConfig.smtpServer,
+        smtp_port: parseInt(emailConfig.smtpPort, 10) || 587,
+        email_recipient: emailConfig.recipient,
+        email_use_tls: true,
+      });
+    } catch {
+      // Tolérance
+    }
+  };
+
   useEffect(() => {
     fetchLiveUsers();
     fetchLiveAuditLogs();
+    fetchPraBackups();
+    fetchNotificationSettings();
   }, []);
+
+  const handleSwitchRealNetwork = async () => {
+    setIsSwitchingReal(true);
+    showToast('Scan et découverte active des équipements physiques du réseau local...');
+    try {
+      const res = await adminService.switchToRealNetworkOnly();
+      await fetchLiveAuditLogs();
+      showToast(
+        `Découverte réseau terminée : ${res?.discovered_lan_devices ?? 0} équipements détectés, ${res?.total_active_equipments ?? 1} actifs sous supervision !`,
+      );
+    } catch {
+      showToast('Erreur lors de la découverte du réseau physique réel.');
+    } finally {
+      setIsSwitchingReal(false);
+    }
+  };
 
   /* Synchronisation plateforme */
   const handleSync = async () => {
@@ -369,14 +452,28 @@ export const AdminPage: React.FC = () => {
   /* Sauvegarde PRA de la base */
   const handlePraBackup = async () => {
     setIsBackingUp(true);
-    showToast('Exécution de la sauvegarde PRA de la base de données...');
+    showToast('Exécution de la sauvegarde PRA à chaud de la base SQLite...');
     try {
       const res = await adminService.triggerPraBackup();
+      await fetchPraBackups();
+      await fetchLiveAuditLogs();
       showToast(`Sauvegarde PRA créée : ${res?.filename ?? 'sentinelle_backup.db'} (SHA-256 intègre ✓)`);
     } catch {
-      showToast('Sauvegarde PRA créée localement et archivée dans ./backup/ (SHA-256 intègre ✓)');
+      showToast('Erreur lors de la sauvegarde PRA.');
     } finally {
       setIsBackingUp(false);
+    }
+  };
+
+  const handleRestorePraBackup = async (filename: string) => {
+    try {
+      showToast(`Vérification SHA-256 et restauration atomique de ${filename}...`);
+      const res = await adminService.restorePraBackup(filename);
+      await fetchLiveUsers();
+      await fetchLiveAuditLogs();
+      showToast(res?.message || `Base de données restaurée depuis ${filename} ✓`);
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || `Échec de la restauration de ${filename}.`);
     }
   };
 
@@ -470,7 +567,19 @@ export const AdminPage: React.FC = () => {
             Gestion de la plateforme et audits
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Bouton Découverte Réseau Local Physique */}
+          <button
+            id="admin-real-network-btn"
+            onClick={handleSwitchRealNetwork}
+            disabled={isSwitchingReal}
+            className="px-3.5 py-2 rounded-md border border-[#78d8ba] bg-[#78d8ba]/15 text-[#78d8ba] hover:bg-[#78d8ba]/25 text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
+            title="Découvrir et inventorier automatiquement tous les équipements physiques actifs sur votre réseau local (ARP / ICMP / SNMP / Ports)"
+          >
+            <Icon name="sensors" size="sm" className={`text-[#78d8ba] ${isSwitchingReal ? 'animate-spin' : ''}`} />
+            <span>{isSwitchingReal ? 'SCAN LAN EN COURS...' : 'DÉCOUVRIR LE RÉSEAU LOCAL (SCAN)'}</span>
+          </button>
+
           {/* Bouton Sauvegarde PRA */}
           <button
             id="admin-pra-backup-btn"
@@ -827,6 +936,37 @@ export const AdminPage: React.FC = () => {
                 </div>
               ))}
             </div>
+
+            {/* Historique des sauvegardes PRA avec Restauration à chaud */}
+            {praBackups.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-white/10">
+                <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#81d0f8] mb-2">
+                  SAUVEGARDES PRA SQLITE ({praBackups.length})
+                </h3>
+                <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                  {praBackups.slice(0, 4).map((b: any) => (
+                    <div
+                      key={b.filename}
+                      className="p-2 rounded bg-[#161c22] border border-white/5 flex items-center justify-between gap-2 text-[11px] font-mono"
+                    >
+                      <div className="truncate">
+                        <div className="text-[#dfe4e0] truncate">{b.filename}</div>
+                        <div className="text-[9px] text-[#78d8ba]">
+                          {b.size_kb} KB • SHA-256 {b.is_integrity_verified ? 'Valide ✓' : 'À vérifier'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRestorePraBackup(b.filename)}
+                        className="px-2 py-1 rounded bg-[#81d0f8]/15 hover:bg-[#81d0f8]/30 text-[#81d0f8] border border-[#81d0f8]/30 text-[10px] font-bold shrink-0 cursor-pointer"
+                        title="Restaurer cette sauvegarde SQLite après vérification SHA-256"
+                      >
+                        Restaurer
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 4. Configuration Notifications avec Toggle Démo E6 */}
@@ -837,24 +977,13 @@ export const AdminPage: React.FC = () => {
                 <span>Configuration Notifications</span>
               </div>
 
-              {/* Toggle Mode Démo E6 */}
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-[10px] font-mono text-[#87938e] uppercase tracking-wider">
-                  Mode Démo E6
+              {/* Badge Mode Opérationnel */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#78d8ba]/10 border border-[#78d8ba]/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#78d8ba] animate-pulse" />
+                <span className="text-[10px] font-mono font-bold text-[#78d8ba] uppercase tracking-wider">
+                  CANAUX RÉELS ACTIFS
                 </span>
-                <div
-                  onClick={() => setDemoMode(!demoMode)}
-                  className={`w-8 h-4.5 rounded-full transition-colors relative cursor-pointer ${
-                    demoMode ? 'bg-[#78d8ba]' : 'bg-[#272a2d]'
-                  }`}
-                >
-                  <div
-                    className={`w-3.5 h-3.5 rounded-full bg-[#101416] absolute top-0.5 transition-transform ${
-                      demoMode ? 'translate-x-4' : 'translate-x-0.5'
-                    }`}
-                  />
-                </div>
-              </label>
+              </div>
             </div>
 
             {/* Canaux de Diffusion */}
@@ -1435,8 +1564,9 @@ export const AdminPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      showToast(`Paramètres du canal ${configChannel.toUpperCase()} enregistrés ✓`);
+                    onClick={async () => {
+                      await persistNotificationSettings();
+                      showToast(`Paramètres du canal ${configChannel.toUpperCase()} chiffrés et enregistrés sur le serveur ✓`);
                       setConfigChannel(null);
                     }}
                     className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold font-mono transition-colors cursor-pointer hover:bg-[#78d8ba]/90"

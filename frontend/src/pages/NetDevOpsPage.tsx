@@ -165,10 +165,10 @@ export const NetDevOpsPage: React.FC = () => {
           id: d.id,
           name: d.name || d.id,
           type: (d.type === 'switch' ? 'Switch' : d.type === 'router' ? 'Router' : 'Firewall') as 'Router' | 'Switch' | 'Firewall',
-          ip: d.id === 'SW-CORE-01' ? '10.0.1.10' : d.id === 'RTR-EDGE-01' ? '10.0.1.1' : d.id === 'FW-PERIMETER-01' ? '192.168.1.254' : '10.0.20.1',
-          cisScore: 75,
-          findings: 2,
-          compliant: false,
+          ip: d.ip || (d.id === 'SW-CORE-01' ? '192.168.1.254' : d.id === 'RTR-EDGE-01' ? '192.168.1.1' : '10.0.1.10'),
+          cisScore: typeof d.cis_score === 'number' ? Math.round(d.cis_score) : 75,
+          findings: typeof d.findings === 'number' ? d.findings : 2,
+          compliant: Boolean(d.compliant),
         }));
         setDevicesList(mapped);
         setSelectedDevice(mapped[0]);
@@ -188,7 +188,7 @@ export const NetDevOpsPage: React.FC = () => {
     showToast(`Audit CIS en cours d'exécution sur ${selectedDevice.name}...`);
     try {
       await loadDeviceAudit(selectedDevice.id);
-      showToast(`Audit CIS terminé pour ${selectedDevice.name} avec sauvegarde automatique.`);
+      showToast(`Audit CIS terminé pour ${selectedDevice.name} avec sauvegarde SHA-256.`);
     } catch {
       showToast(`Audit CIS terminé : Score actuel = ${selectedDevice.cisScore}%.`);
     } finally {
@@ -196,13 +196,39 @@ export const NetDevOpsPage: React.FC = () => {
     }
   };
 
-  const handleApplySSH = () => {
+  const handleApplySSH = async () => {
     setIsApplyingSSH(true);
-    setTimeout(() => {
-      setIsApplyingSSH(false);
+    try {
+      const res = await netdevopsService.remediate(
+        selectedDevice.id,
+        selectedFinding.suggestedConfigSnippet,
+        selectedFinding.id,
+      );
+      await loadDeviceAudit(selectedDevice.id);
       setShowApplyDrawer(false);
-      showToast(`Configuration Cisco IOS appliquée avec succès sur ${selectedDevice.name} via Netmiko SSH.`);
-    }, 1500);
+      showToast(
+        res?.message ||
+          `Remédiation appliquée sur ${selectedDevice.name} (Score CIS : ${res?.new_score ?? 100}%).`,
+      );
+    } catch {
+      showToast(`Erreur lors de l'application du correctif sur ${selectedDevice.name}.`);
+    } finally {
+      setIsApplyingSSH(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!selectedBackup) return;
+    const idx = parseInt(selectedBackup.id.replace('b-', ''), 10) || 0;
+    try {
+      const res = await netdevopsService.restoreBackup(selectedDevice.id, idx);
+      await loadDeviceAudit(selectedDevice.id);
+      setShowRestoreDrawer(false);
+      showToast(res?.message || `Configuration restaurée avec succès sur ${selectedDevice.name}.`);
+    } catch {
+      setShowRestoreDrawer(false);
+      showToast(`Erreur lors de la restauration de la sauvegarde.`);
+    }
   };
 
 
@@ -237,7 +263,7 @@ export const NetDevOpsPage: React.FC = () => {
                 Équipements Réseau
               </h2>
               <span className="text-[11px] font-mono text-[#87938e] px-2 py-0.5 rounded bg-[#161c22] border border-[#272a2d]">
-                35 total
+                {devicesList.length} total
               </span>
             </div>
 
@@ -618,10 +644,7 @@ write memory`}
 
             <div className="pt-6 border-t border-[#272a2d] flex gap-2">
               <button
-                onClick={() => {
-                  showToast(`Restauration exécutée avec succès sur ${selectedDevice.name}.`);
-                  setShowRestoreDrawer(false);
-                }}
+                onClick={handleRestoreBackup}
                 className="flex-1 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-mono font-bold text-xs transition-colors"
               >
                 Confirmer le Rollback

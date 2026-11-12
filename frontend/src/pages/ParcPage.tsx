@@ -211,34 +211,71 @@ export const ParcPage: React.FC = () => {
           const hours = Math.floor((eq.uptime_secondes % 86400) / 3600);
           const uptimeStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
 
+          const realCpu = typeof eq.cpu_percent === 'number' ? Math.round(eq.cpu_percent) : 0;
+          const realRam = typeof eq.ram_percent === 'number' ? Math.round(eq.ram_percent) : 0;
+          const realCpuHist =
+            Array.isArray(eq.cpu_history) && eq.cpu_history.length > 0
+              ? eq.cpu_history.map(v => Math.max(4, Math.min(100, Math.round(v))))
+              : [realCpu];
+          const realRamHist =
+            Array.isArray(eq.ram_history) && eq.ram_history.length > 0
+              ? eq.ram_history.map(v => Math.max(4, Math.min(100, Math.round(v))))
+              : [realRam];
+
+          const diffSec = eq.derniere_collecte
+            ? Math.max(0, Math.floor((Date.now() - new Date(eq.derniere_collecte).getTime()) / 1000))
+            : 0;
+          const lastSeenStr =
+            eq.statut_collecte !== 'OK'
+              ? 'Injoignable'
+              : diffSec < 60
+              ? `Il y a ${diffSec}s`
+              : `Il y a ${Math.floor(diffSec / 60)} min`;
+
           return {
             id: String(eq.id),
             name: eq.nom,
             type: eqType,
-            status,
+            status: eq.statut_collecte !== 'OK' ? 'critique' : status,
             ip: eq.ip,
-            mac: eq.mac || '00:50:56:A1:B2:C3',
-            os: eq.os || (eqType === 'Firewall' ? 'PAN-OS 10.1' : eqType === 'Router' ? 'Cisco IOS XE 17.3' : eqType === 'Switch' ? 'Cisco IOS-XE 16.9' : 'Linux Debian 12'),
+            mac: eq.mac || 'Non résolue (ARP)',
+            os: eq.os || 'OS non détecté',
             uptime: uptimeStr,
             health: Math.round(eq.score_sante),
-            lastSeen: 'Il y a 1 min',
-            model: eq.firmware || (eqType === 'Firewall' ? 'PA-3220' : eqType === 'Router' ? 'Cisco ISR 4331' : eqType === 'Switch' ? 'Catalyst 9300' : 'PowerEdge R640'),
+            lastSeen: lastSeenStr,
+            model: eq.firmware || eq.type,
             serial: `SN-${String(eq.id).padStart(6, '0')}`,
-            location: eq.groupe ? `Datacenter Paris - ${eq.groupe}` : 'Datacenter Paris - Rack 01',
-            role: `${eq.type} (${eq.groupe})`,
-            cpuLoad: 20 + ((eq.id * 17) % 60),
-            memLoad: 35 + ((eq.id * 13) % 45),
-            cpuHistory: [25, 28, 30, 32, 28, 35, 40, 38, 35, 20 + ((eq.id * 17) % 60)],
-            memHistory: [40, 42, 42, 44, 45, 45, 46, 48, 48, 35 + ((eq.id * 13) % 45)],
-            anomalies: eq.score_sante < 70 ? [
-              {
-                title: 'Dégradation de santé',
-                desc: `Score de santé sous le seuil nominal (${Math.round(eq.score_sante)}%)`,
-                icon: 'bolt'
-              }
-            ] : [],
-            lastBackup: "Aujourd'hui, 02:00",
-            cisAudit: eq.score_sante >= 80 ? { status: 'ok', message: 'Conforme CIS Benchmark' } : { status: 'fail', message: 'Écarts de configuration détectés' },
+            location: eq.groupe ? `${eq.groupe}` : 'Réseau Local',
+            role: `${eq.type} (${eq.groupe || 'Production'})`,
+            cpuLoad: realCpu,
+            memLoad: realRam,
+            cpuHistory: realCpuHist,
+            memHistory: realRamHist,
+            anomalies:
+              eq.statut_collecte !== 'OK'
+                ? [
+                    {
+                      title: 'Hôte injoignable au sondage ICMP/TCP',
+                      desc: `Aucune réponse sur ${eq.ip}`,
+                      icon: 'bolt',
+                    },
+                  ]
+                : (eq.active_alerts_count ?? 0) > 0 || eq.score_sante < 75
+                ? [
+                    {
+                      title: `${eq.active_alerts_count || 1} alerte(s) active(s) sur cet équipement`,
+                      desc: `Score de santé : ${Math.round(eq.score_sante)}%`,
+                      icon: 'bolt',
+                    },
+                  ]
+                : [],
+            lastBackup: eq.last_backup || 'Aucune sauvegarde',
+            cisAudit:
+              eq.cis_status === 'Conforme'
+                ? { status: 'ok', message: eq.cis_message || 'Conforme CIS Benchmark' }
+                : eq.cis_status === 'Non conforme'
+                ? { status: 'fail', message: eq.cis_message || 'Écarts CIS détectés' }
+                : { status: 'ok', message: eq.cis_message || 'Prêt pour audit CIS' },
           };
         });
 
@@ -293,6 +330,74 @@ export const ParcPage: React.FC = () => {
   const [newEqIp, setNewEqIp] = useState('');
   const [newEqMac, setNewEqMac] = useState('');
   const [newEqModel, setNewEqModel] = useState('');
+  const [newEqSshCreds, setNewEqSshCreds] = useState('');
+  const [isProbingSingle, setIsProbingSingle] = useState(false);
+
+  /* Calcul dynamique de la topologie SVG à partir des vrais équipements du parc */
+  const dynamicTopo = React.useMemo(() => {
+    if (!equipments || equipments.length === 0) {
+      return { nodes: TOPO_NODES, links: [] as { x1: number; y1: number; x2: number; y2: number; dashed?: boolean }[] };
+    }
+    const routers = equipments.filter(e => e.type === 'Router' || e.type === 'Firewall');
+    const switches = equipments.filter(e => e.type === 'Switch');
+    const servers = equipments.filter(e => e.type === 'Serveur');
+
+    const topTier = routers.length > 0 ? routers : [equipments[0]];
+    const topIds = new Set(topTier.map(e => e.id));
+    const midTier = switches.filter(e => !topIds.has(e.id));
+    const midIds = new Set(midTier.map(e => e.id));
+    const botTier = [...servers, ...equipments].filter(e => !topIds.has(e.id) && !midIds.has(e.id));
+    // Dédoublonner botTier
+    const seenBot = new Set<string>();
+    const uniqueBot = botTier.filter(e => {
+      if (seenBot.has(e.id)) return false;
+      seenBot.add(e.id);
+      return true;
+    });
+
+    const placeRow = (items: Equipment[], cy: number, radius: number): TopoNode[] => {
+      const count = items.length;
+      if (count === 0) return [];
+      const spacing = 520 / (count + 1);
+      return items.map((eq, idx) => ({
+        id: eq.id,
+        name: eq.name,
+        cx: Math.round(40 + spacing * (idx + 1)),
+        cy,
+        r: radius,
+        status: eq.status,
+        isPulse: eq.status === 'critique',
+      }));
+    };
+
+    const topNodes = placeRow(topTier, 55, 15);
+    const midNodes = placeRow(midTier, 145, 12);
+    const botNodes = placeRow(uniqueBot, 235, 9);
+
+    const links: { x1: number; y1: number; x2: number; y2: number; dashed?: boolean }[] = [];
+    if (midNodes.length > 0) {
+      topNodes.forEach(t => {
+        midNodes.forEach(m => {
+          links.push({ x1: t.cx, y1: t.cy, x2: m.cx, y2: m.cy });
+        });
+      });
+      botNodes.forEach((b, i) => {
+        const parent = midNodes[i % midNodes.length];
+        links.push({ x1: parent.cx, y1: parent.cy, x2: b.cx, y2: b.cy, dashed: b.status === 'critique' });
+      });
+    } else {
+      topNodes.forEach(t => {
+        botNodes.forEach(b => {
+          links.push({ x1: t.cx, y1: t.cy, x2: b.cx, y2: b.cy, dashed: b.status === 'critique' });
+        });
+      });
+    }
+
+    return {
+      nodes: [...topNodes, ...midNodes, ...botNodes],
+      links,
+    };
+  }, [equipments]);
 
   /* Découverte Réseau Réel Physique */
   const [showRealScanModal, setShowRealScanModal] = useState(false);
@@ -394,14 +499,16 @@ export const ParcPage: React.FC = () => {
         firmware: newEqModel.trim() || 'Modèle actif standard',
         groupe: 'Production',
         seuil_disque_alerte: 85.0,
+        mot_de_passe_secret: newEqSshCreds.trim() || undefined,
       });
 
-      showToast(`Équipement ${created.nom} (${created.ip}) persisté avec succès dans le parc !`);
+      showToast(`Équipement ${created.nom} (${created.ip}) persisté et sondé dans le parc !`);
       setShowAddModal(false);
       setNewEqName('');
       setNewEqIp('');
       setNewEqMac('');
       setNewEqModel('');
+      setNewEqSshCreds('');
       await loadEquipements();
     } catch (err: any) {
       const errorDetail = err?.response?.data?.detail || "Erreur lors de l'enregistrement de l'équipement";
@@ -780,16 +887,22 @@ export const ParcPage: React.FC = () => {
               style={{ transform: `scale(${zoomLevel})` }}
             >
               <g>
-                {/* ── Liens réseau ────────────────────────────────────────── */}
-                <line x1="350" y1="60" x2="210" y2="155" stroke="#3e4945" strokeWidth="1.5" />
-                <line x1="350" y1="60" x2="520" y2="155" stroke="#3e4945" strokeWidth="1.5" opacity="0.3" />
-                <line x1="210" y1="155" x2="160" y2="245" stroke="#3e4945" strokeWidth="1.5" />
-                <line x1="210" y1="155" x2="260" y2="245" stroke="#3e4945" strokeWidth="1.5" />
-                <line x1="210" y1="155" x2="460" y2="245" stroke="#3e4945" strokeWidth="1.5" strokeDasharray="4" />
-                <line x1="260" y1="245" x2="460" y2="245" stroke="#3e4945" strokeWidth="1.5" opacity="0.2" />
+                {/* ── Liens réseau dynamiques ─────────────────────────────── */}
+                {dynamicTopo.links.map((lnk, idx) => (
+                  <line
+                    key={idx}
+                    x1={lnk.x1}
+                    y1={lnk.y1}
+                    x2={lnk.x2}
+                    y2={lnk.y2}
+                    stroke={lnk.dashed ? '#ffb4ab' : '#3e4945'}
+                    strokeWidth="1.5"
+                    strokeDasharray={lnk.dashed ? '4' : undefined}
+                  />
+                ))}
 
-                {/* ── Nœuds réseau ────────────────────────────────────────── */}
-                {TOPO_NODES.map(node => {
+                {/* ── Nœuds réseau dynamiques ─────────────────────────────── */}
+                {dynamicTopo.nodes.map(node => {
                   const isSelected = selectedEq?.id === node.id;
                   const nodeFill =
                     node.status === 'sain'
@@ -1263,8 +1376,32 @@ export const ParcPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Footer Action : Terminal SSH & Suppression */}
+          {/* Footer Action : Sonder, Terminal SSH & Suppression */}
           <div className="p-3 border-t border-[#3e4945] bg-[#1c211e] flex gap-2">
+            <button
+              id="parc-probe-eq-btn"
+              disabled={isProbingSingle}
+              onClick={async () => {
+                const numericId = parseInt(selectedEq.id, 10);
+                if (isNaN(numericId)) return;
+                setIsProbingSingle(true);
+                showToast(`Sondage actif ICMP/TCP/SSH de ${selectedEq.name} (${selectedEq.ip})...`);
+                try {
+                  await parcService.probeEquipement(numericId);
+                  await loadEquipements();
+                  showToast(`Sondage de ${selectedEq.name} terminé et métriques enregistrées.`);
+                } catch {
+                  showToast(`Erreur lors du sondage de ${selectedEq.name}.`);
+                } finally {
+                  setIsProbingSingle(false);
+                }
+              }}
+              className="px-2.5 bg-[#78d8ba]/15 border border-[#78d8ba]/40 text-[#78d8ba] py-2 rounded text-xs font-semibold flex items-center justify-center gap-1 hover:bg-[#78d8ba]/25 transition-colors shadow-sm disabled:opacity-50"
+              title="Sonder cet équipement en temps réel (Ping / Ports / SSH)"
+            >
+              <Icon name="refresh" size="xs" className={isProbingSingle ? 'animate-spin' : ''} />
+              <span>Sonder</span>
+            </button>
             <button
               id="parc-open-ssh-btn"
               onClick={() => setShowSshModal(true)}
@@ -1788,6 +1925,19 @@ export const ParcPage: React.FC = () => {
                     className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] focus:outline-none focus:border-[#78d8ba]"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-[#bdc9c3] mb-1">
+                  Identifiants SSH (optionnel, chiffré AES-256 Fernet)
+                </label>
+                <input
+                  type="password"
+                  placeholder="utilisateur:motdepasse (ex: admin:Secret123)"
+                  value={newEqSshCreds}
+                  onChange={e => setNewEqSshCreds(e.target.value)}
+                  className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] font-mono focus:outline-none focus:border-[#78d8ba]"
+                />
               </div>
 
               {/* Boutons d'action */}

@@ -46,6 +46,18 @@ export interface Equipement {
   derniere_collecte: string;
   groupe: string;
   seuil_disque_alerte: number;
+  // Champs télémétrie enrichis SQLite
+  cpu_percent?: number;
+  ram_percent?: number;
+  disk_percent?: number;
+  network_mbps?: number;
+  cpu_history?: number[];
+  ram_history?: number[];
+  active_alerts_count?: number;
+  has_ssh_credentials?: boolean;
+  cis_status?: 'Conforme' | 'Non conforme' | 'Non audité';
+  cis_message?: string;
+  last_backup?: string;
 }
 
 export interface MetricPoint {
@@ -81,13 +93,16 @@ export interface Prediction {
 export interface Alerte {
   id: number;
   equipement_id?: number;
-  module_origine: 'Supervision' | 'Sécurité' | 'NetDevOps' | 'Parc';
+  equipement_nom?: string;
+  module_origine: 'Supervision' | 'Sécurité' | 'NetDevOps' | 'Parc' | string;
   severite: 'INFO' | 'WARNING' | 'CRITICAL';
   titre: string;
   message: string;
   statut: 'Active' | 'Acquittée' | 'Résolue';
   correlation_id?: string;
   date_creation: string;
+  acquittee_par?: string;
+  date_acquittement?: string;
 }
 
 export interface HardwareLiveStats {
@@ -107,6 +122,7 @@ export interface HardwareLiveStats {
   disk_mount: string;
   network_sent_mb: number;
   network_recv_mb: number;
+  network_mbps?: number;
   uptime_secondes: number;
   score_sante: number;
   horodatage: string;
@@ -138,5 +154,3 @@ export interface RealNetworkScanResponse {
   devices: DiscoveredDevice[];
   scan_duration_ms: number;
 }
-
-

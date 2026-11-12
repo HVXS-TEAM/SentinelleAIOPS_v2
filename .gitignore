@@ -20,6 +20,7 @@ htmlcov/
 *.sqlite3
 
 # Node / Frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
@@ -33,5 +34,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+*.zip
 Nouveau Document texte.txt
 

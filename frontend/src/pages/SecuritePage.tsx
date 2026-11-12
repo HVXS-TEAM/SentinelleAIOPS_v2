@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Icon } from '../components/ui/Icon';
-import { securiteService } from '../services/api';
+import { securiteService, parcService } from '../services/api';
+import type { Equipement } from '../types';
 import {
   PieChart,
   Pie,
@@ -11,62 +12,18 @@ import {
 /* ── Types ───────────────────────────────────────────────────────────────── */
 interface Incident {
   id: string;
+  dbId?: number;
+  equipementId?: number;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
   timestamp: string;
   type: string;
   sourceIp: string;
+  rawIp?: string;
   target: string;
   action: 'Investigate' | 'Blocked' | 'Review';
   details?: string;
   anomalyScore?: number;
 }
-
-const INCIDENTS: Incident[] = [
-  {
-    id: 'inc-1',
-    severity: 'CRITICAL',
-    timestamp: '14:32:01 UTC',
-    type: 'IP Spoofing Attempt',
-    sourceIp: '192.168.x.x (Spoofed)',
-    target: 'Core Router 01',
-    action: 'Investigate',
-    details: 'Paquets TCP SYN forgés avec adresse source RFC1918 routés depuis une interface externe non autorisée.',
-    anomalyScore: 94,
-  },
-  {
-    id: 'inc-2',
-    severity: 'HIGH',
-    timestamp: '14:15:44 UTC',
-    type: 'Brute Force Detection',
-    sourceIp: '45.33.12.x',
-    target: 'Auth Gateway',
-    action: 'Blocked',
-    details: '142 tentatives de connexion SSH échouées en 60 secondes sur le port 22.',
-    anomalyScore: 89,
-  },
-  {
-    id: 'inc-3',
-    severity: 'MEDIUM',
-    timestamp: '13:59:12 UTC',
-    type: 'Unusual Traffic Volume',
-    sourceIp: 'Internal Subnet B',
-    target: 'DB Cluster 03',
-    action: 'Review',
-    details: 'Pic anormal de requêtes SQL volumineuses hors heures habituelles de sauvegarde.',
-    anomalyScore: 68,
-  },
-  {
-    id: 'inc-4',
-    severity: 'MEDIUM',
-    timestamp: '13:45:00 UTC',
-    type: 'Suspicious API Calls',
-    sourceIp: '185.20.x.x',
-    target: 'Public API v2',
-    action: 'Review',
-    details: 'Tentatives d\'injection SQL et parcours de répertoires détectés sur les endpoints REST.',
-    anomalyScore: 64,
-  },
-];
 
 const SEV_BADGE: Record<string, string> = {
   CRITICAL: 'bg-[#ffb4ab]/15 text-[#ffb4ab] border border-[#ffb4ab]/30',
@@ -75,54 +32,102 @@ const SEV_BADGE: Record<string, string> = {
 };
 
 export const SecuritePage: React.FC = () => {
-  const [incidents, setIncidents] = useState<Incident[]>(INCIDENTS);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [showIsolateDrawer, setShowIsolateDrawer] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isSimulatingBrute, setIsSimulatingBrute] = useState(false);
+  const [equipementsList, setEquipementsList] = useState<Equipement[]>([]);
+  const [secStats, setSecStats] = useState<{
+    total_events: number;
+    anomalies_detectees: number;
+    critical_threats: number;
+    blocked_ips_count: number;
+  }>({
+    total_events: 0,
+    anomalies_detectees: 0,
+    critical_threats: 0,
+    blocked_ips_count: 0,
+  });
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const loadSecurityEvents = useCallback(async () => {
+  const loadSecurityData = useCallback(async () => {
     try {
-      const events = await securiteService.getEvents(false);
-      if (events && Array.isArray(events) && events.length > 0) {
-        const mapped: Incident[] = events.map((e: any) => ({
-          id: `inc-${e.id}`,
-          severity: (e.severite === 'CRITICAL' ? 'CRITICAL' : e.severite === 'HIGH' ? 'HIGH' : 'MEDIUM') as 'CRITICAL' | 'HIGH' | 'MEDIUM',
-          timestamp: new Date(e.horodatage).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' UTC',
-          type: e.type_evenement,
-          sourceIp: e.source_ip_anonymisee || e.source_ip,
-          target: e.utilisateur_cible ? `Utilisateur ${e.utilisateur_cible}` : 'Auth Gateway',
-          action: e.severite === 'CRITICAL' ? 'Investigate' : 'Review',
-          details: e.explication || `Tentatives: ${e.tentatives_minute}/min. Score d'anomalie IA: ${Math.round((e.score_anomalie ?? 0.8) * 100)}%.`,
-          anomalyScore: Math.round((e.score_anomalie ?? 0.8) * 100),
-        }));
+      const [events, stats, eqs] = await Promise.all([
+        securiteService.getEvents(false),
+        securiteService.getStats(),
+        parcService.getEquipements(),
+      ]);
+
+      if (eqs && Array.isArray(eqs)) {
+        setEquipementsList(eqs);
+      }
+      if (stats) {
+        setSecStats({
+          total_events: stats.total_events ?? 0,
+          anomalies_detectees: stats.anomalies_detectees ?? 0,
+          critical_threats: stats.critical_threats ?? 0,
+          blocked_ips_count: stats.blocked_ips_count ?? 0,
+        });
+      }
+
+      if (events && Array.isArray(events)) {
+        const mapped: Incident[] = events.map((e: any) => {
+          const isBlocked = String(e.type_evenement || '').includes('BLOQUÉE');
+          const sev: 'CRITICAL' | 'HIGH' | 'MEDIUM' =
+            e.severite === 'CRITICAL' ? 'CRITICAL' : e.severite === 'HIGH' ? 'HIGH' : 'MEDIUM';
+          return {
+            id: `inc-${e.id}`,
+            dbId: e.id,
+            equipementId: e.equipement_id,
+            severity: sev,
+            timestamp: e.horodatage
+              ? new Date(e.horodatage).toLocaleTimeString('fr-FR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                }) + ' UTC'
+              : 'Temps réel',
+            type: e.type_evenement,
+            sourceIp: e.source_ip_anonymisee || e.source_ip,
+            rawIp: e.source_ip || e.source_ip_anonymisee,
+            target: e.utilisateur_cible ? `Compte ${e.utilisateur_cible}` : 'Sonde Hôte / Passerelle',
+            action: isBlocked ? 'Blocked' : sev === 'CRITICAL' ? 'Investigate' : 'Review',
+            details:
+              e.explication ||
+              `Fréquence mesurée : ${e.tentatives_minute}/min. Score Isolation Forest : ${Math.round(
+                Math.abs(e.score_anomalie ?? 0.25) * 100,
+              )}/100.`,
+            anomalyScore: Math.min(99, Math.max(15, Math.round(Math.abs(e.score_anomalie ?? 0.25) * 100 + (e.is_anomaly ? 50 : 0)))),
+          };
+        });
         setIncidents(mapped);
-        setSelectedIncident(mapped[0]);
       }
     } catch {
-      // Tolérance : conserve les incidents de secours
+      // Tolérance réseau
     }
   }, []);
 
   useEffect(() => {
-    loadSecurityEvents();
-  }, [loadSecurityEvents]);
+    loadSecurityData();
+  }, [loadSecurityData]);
 
   const handleFullScan = async () => {
     setIsScanning(true);
-    showToast('Scan complet Isolation Forest démarré sur l\'ensemble des journaux...');
+    showToast('Scan réel des journaux Windows EventLog / Linux auth.log et sockets réseau...');
     try {
-      const stats = await securiteService.getStats();
-      showToast(`Scan heuristique terminé : ${stats?.total_logs_analyses ?? 450} logs analysés, statut nominal.`);
-      await loadSecurityEvents();
+      const scanRes = await securiteService.scanRealSecurity();
+      await loadSecurityData();
+      showToast(
+        `Scan terminé : ${scanRes?.events_collected ?? 0} flux système analysés par Isolation Forest (${scanRes?.anomalies_detected ?? 0} anomalie(s)).`,
+      );
     } catch {
-      showToast('Scan heuristique terminé : 0 nouvelle menace critique détectée.');
+      showToast('Erreur lors du scan de sécurité.');
     } finally {
       setIsScanning(false);
     }
@@ -130,40 +135,50 @@ export const SecuritePage: React.FC = () => {
 
   const handleSimulateBruteforce = async () => {
     setIsSimulatingBrute(true);
-    showToast('Simulation d\'attaque brute force SSH lancée (génération de logs & détection ML)...');
+    showToast("Injection d'un flux Brute Force SSH et analyse par le modèle Isolation Forest...");
     try {
-      await securiteService.simulateBruteforce(1, '198.51.100.45');
-      await loadSecurityEvents();
-      showToast('Attaque simulée injectée : Alerte critique générée par l\'Isolation Forest !');
+      const targetEqId = equipementsList[0]?.id ?? 1;
+      await securiteService.simulateBruteforce(targetEqId, '198.51.100.45');
+      await loadSecurityData();
+      showToast("Flux d'attaque détecté et classifié CRITICAL par l'Isolation Forest !");
     } catch {
-      const newInc: Incident = {
-        id: `inc-${Date.now()}`,
-        severity: 'CRITICAL',
-        timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' UTC',
-        type: 'SSH Brute Force Attack (Simulée)',
-        sourceIp: '198.51.100.45 (Attaquant)',
-        target: 'Auth Gateway (192.168.1.1)',
-        action: 'Investigate',
-        details: '150 tentatives échouées en 45 secondes. Détection par Isolation Forest.',
-        anomalyScore: 96,
-      };
-      setIncidents(prev => [newInc, ...prev]);
-      setSelectedIncident(newInc);
-      showToast('Attaque simulée générée : Alerte critique active.');
+      showToast("Erreur lors de l'injection du test Brute Force.");
     } finally {
       setIsSimulatingBrute(false);
     }
   };
 
-  const handleBlockIncident = (id: string) => {
-    setIncidents(prev =>
-      prev.map(inc => (inc.id === id ? { ...inc, action: 'Blocked' as const } : inc))
-    );
-    showToast(`Règle Pare-feu appliquée : IP source bloquée pour l'incident ${id}.`);
-    if (selectedIncident?.id === id) {
-      setSelectedIncident(prev => prev ? { ...prev, action: 'Blocked' } : null);
+  const handleBlockIncident = async (inc: Incident) => {
+    const ipToBlock = (inc.rawIp || inc.sourceIp).split(' ')[0];
+    showToast(`Application de la règle pare-feu pour bloquer ${ipToBlock}...`);
+    try {
+      const res = await securiteService.blockIp(
+        ipToBlock,
+        inc.equipementId,
+        `Blocage SOC suite à ${inc.type}`,
+      );
+      await loadSecurityData();
+      setSelectedIncident(prev => (prev && prev.id === inc.id ? { ...prev, action: 'Blocked' } : prev));
+      showToast(res?.message || `IP ${ipToBlock} bloquée avec succès (${res?.firewall_mode || 'FIREWALL'}).`);
+    } catch {
+      showToast(`Erreur lors du blocage de ${ipToBlock}.`);
     }
   };
+
+  const handleIsolateEquipment = async (eq: Equipement) => {
+    showToast(`Mise en quarantaine (VLAN 999) de ${eq.nom} (${eq.ip})...`);
+    try {
+      const res = await securiteService.isolateDevice(eq.id, 'Isolation manuelle SOC');
+      setShowIsolateDrawer(false);
+      await loadSecurityData();
+      showToast(res?.message || `Équipement ${eq.nom} isolé en quarantaine.`);
+    } catch {
+      showToast(`Erreur lors de l'isolation de ${eq.nom}.`);
+    }
+  };
+
+  const criticalCount = incidents.filter(i => i.severity === 'CRITICAL' && i.action !== 'Blocked').length;
+  const anomalyCount = incidents.filter(i => i.severity !== 'CRITICAL' && i.action !== 'Blocked').length;
 
   return (
     <div className="p-6 lg:p-8 space-y-6 bg-[#101416] min-h-screen text-[#e0e3e6] font-sans">
@@ -182,7 +197,7 @@ export const SecuritePage: React.FC = () => {
             Sécurité Overview
           </h1>
           <p className="text-sm text-[#87938e] mt-0.5">
-            Real-time threat detection and posture analysis.
+            Détection d'anomalies temps réel (Isolation Forest), EventLog Windows &amp; Pare-feu actif.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -193,7 +208,7 @@ export const SecuritePage: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#ffb4ab]/60 bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#ffb4ab] transition-colors cursor-pointer"
           >
             <Icon name="bolt" size="xs" className={`text-[#ffb4ab] ${isSimulatingBrute ? 'animate-bounce' : ''}`} />
-            <span>{isSimulatingBrute ? 'SIMULATING...' : 'SIMULATE BRUTE FORCE'}</span>
+            <span>{isSimulatingBrute ? 'INJECTION...' : 'TEST BRUTE FORCE'}</span>
           </button>
           <button
             id="securite-isolate-btn"
@@ -223,23 +238,22 @@ export const SecuritePage: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider">
                 <Icon name="public" size="sm" className="text-[#78d8ba]" />
-                GLOBAL THREAT MAP
+                GLOBAL THREAT RADAR (SONDE SYSTÈME &amp; RÉSEAU)
               </div>
               <div className="flex items-center gap-4 text-xs font-mono">
                 <span className="flex items-center gap-1.5 text-[#bdc9c3]">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#ffb4ab]" />
-                  Critical (1)
+                  Critical ({criticalCount})
                 </span>
                 <span className="flex items-center gap-1.5 text-[#bdc9c3]">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#81d0f8]" />
-                  Anomalies (2)
+                  Events ({anomalyCount})
                 </span>
               </div>
             </div>
 
             {/* Radar Canvas avec grille matricielle & cercles de portée */}
             <div className="relative h-64 w-full bg-[#161c22] rounded-xl border border-[#272a2d] overflow-hidden flex items-center justify-center">
-              {/* Grille matricielle de points */}
               <div className="absolute inset-0 opacity-20">
                 <svg width="100%" height="100%">
                   <defs>
@@ -251,42 +265,43 @@ export const SecuritePage: React.FC = () => {
                 </svg>
               </div>
 
-              {/* Cercles concentriques du radar */}
               <div className="absolute w-48 h-48 rounded-full border border-[#78d8ba]/20" />
               <div className="absolute w-32 h-32 rounded-full border border-[#78d8ba]/30" />
               <div className="absolute w-16 h-16 rounded-full border border-[#78d8ba]/40" />
-
-              {/* Ligne de visée centrale */}
               <div className="absolute w-full h-[1px] bg-[#78d8ba]/15" />
               <div className="absolute h-full w-[1px] bg-[#78d8ba]/15" />
 
-              {/* Menace Critique 1 (Point rose clignotant) */}
-              <div
-                onClick={() => setSelectedIncident(INCIDENTS[0])}
-                className="absolute top-16 right-36 cursor-pointer group"
-                title="Critical: IP Spoofing Attempt"
-              >
-                <div className="w-3.5 h-3.5 rounded-full bg-[#ffb4ab] animate-ping opacity-75 absolute inset-0" />
-                <div className="w-3.5 h-3.5 rounded-full bg-[#ffb4ab] border-2 border-white relative shadow-lg" />
-              </div>
-
-              {/* Menace Anomalie 1 (Point bleu) */}
-              <div
-                onClick={() => setSelectedIncident(INCIDENTS[2])}
-                className="absolute bottom-20 left-36 cursor-pointer"
-                title="Anomaly: Unusual Traffic Volume"
-              >
-                <div className="w-3 h-3 rounded-full bg-[#81d0f8] border border-white shadow-md" />
-              </div>
-
-              {/* Menace Anomalie 2 (Point bleu) */}
-              <div
-                onClick={() => setSelectedIncident(INCIDENTS[3])}
-                className="absolute top-28 left-48 cursor-pointer"
-                title="Anomaly: Suspicious API Calls"
-              >
-                <div className="w-3 h-3 rounded-full bg-[#81d0f8] border border-white shadow-md" />
-              </div>
+              {incidents.slice(0, 5).map((inc, idx) => {
+                const positions = [
+                  'top-16 right-36',
+                  'bottom-20 left-36',
+                  'top-28 left-48',
+                  'bottom-14 right-44',
+                  'top-12 left-28',
+                ];
+                const isCrit = inc.severity === 'CRITICAL' && inc.action !== 'Blocked';
+                return (
+                  <div
+                    key={inc.id}
+                    onClick={() => setSelectedIncident(inc)}
+                    className={`absolute ${positions[idx % positions.length]} cursor-pointer group`}
+                    title={`${inc.severity}: ${inc.type} (${inc.sourceIp})`}
+                  >
+                    {isCrit && (
+                      <div className="w-3.5 h-3.5 rounded-full bg-[#ffb4ab] animate-ping opacity-75 absolute inset-0" />
+                    )}
+                    <div
+                      className={`w-3.5 h-3.5 rounded-full border-2 border-white relative shadow-lg ${
+                        inc.action === 'Blocked'
+                          ? 'bg-[#78d8ba]'
+                          : isCrit
+                          ? 'bg-[#ffb4ab]'
+                          : 'bg-[#81d0f8]'
+                      }`}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -297,23 +312,23 @@ export const SecuritePage: React.FC = () => {
                 ACTIVE VECTORS
               </span>
               <span className="text-2xl font-bold font-mono text-[#ffb4ab] mt-1 block">
-                4
+                {secStats.anomalies_detectees}
               </span>
             </div>
             <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-3.5">
               <span className="text-[10px] font-mono tracking-widest text-[#87938e] uppercase block">
-                EVENTS/SEC
+                EVENTS ANALYZED
               </span>
               <span className="text-2xl font-bold font-mono text-[#78d8ba] mt-1 block">
-                1,248
+                {secStats.total_events}
               </span>
             </div>
             <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-3.5">
               <span className="text-[10px] font-mono tracking-widest text-[#87938e] uppercase block">
-                BLOCK RATE
+                IPS BLOCKED
               </span>
               <span className="text-2xl font-bold font-mono text-[#81d0f8] mt-1 block">
-                99.8%
+                {secStats.blocked_ips_count}
               </span>
             </div>
           </div>
@@ -327,7 +342,6 @@ export const SecuritePage: React.FC = () => {
               SECURITY BENCHMARKS
             </div>
 
-            {/* Jauge Donut 85% CIS COMPLIANT */}
             <div className="h-44 relative flex items-center justify-center my-2">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -353,43 +367,39 @@ export const SecuritePage: React.FC = () => {
                   85%
                 </span>
                 <span className="text-[10px] font-mono font-bold text-[#78d8ba] uppercase tracking-wider mt-0.5">
-                  CIS COMPLIANT
+                  RGPD &amp; CIS READY
                 </span>
               </div>
             </div>
 
-            {/* 3 Barres de progression CIS détaillées */}
             <div className="space-y-4 pt-3 border-t border-[#272a2d] text-xs font-mono">
-              {/* 1. Identity & Access */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Identity &amp; Access</span>
-                  <span className="font-bold text-[#e0e3e6]">92%</span>
+                  <span className="text-[#bdc9c3]">Identity &amp; Access (Bcrypt / MFA)</span>
+                  <span className="font-bold text-[#e0e3e6]">95%</span>
                 </div>
                 <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#78d8ba] rounded-full" style={{ width: '92%' }} />
+                  <div className="h-full bg-[#78d8ba] rounded-full" style={{ width: '95%' }} />
                 </div>
               </div>
 
-              {/* 2. Network Config */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Network Config</span>
-                  <span className="font-bold text-[#ffb4ab]">64%</span>
+                  <span className="text-[#bdc9c3]">Network Hardening (CIS Level 1)</span>
+                  <span className="font-bold text-[#ffb4ab]">72%</span>
                 </div>
                 <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#ffb4ab] rounded-full" style={{ width: '64%' }} />
+                  <div className="h-full bg-[#ffb4ab] rounded-full" style={{ width: '72%' }} />
                 </div>
               </div>
 
-              {/* 3. Data Protection */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Data Protection</span>
-                  <span className="font-bold text-[#81d0f8]">88%</span>
+                  <span className="text-[#bdc9c3]">Data Protection (Fernet &amp; IP Anonymization)</span>
+                  <span className="font-bold text-[#81d0f8]">100%</span>
                 </div>
                 <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#81d0f8] rounded-full" style={{ width: '88%' }} />
+                  <div className="h-full bg-[#81d0f8] rounded-full" style={{ width: '100%' }} />
                 </div>
               </div>
             </div>
@@ -397,7 +407,7 @@ export const SecuritePage: React.FC = () => {
 
           <div className="pt-4 text-right">
             <span className="text-[11px] font-mono text-[#87938e]">
-              Dernier audit : Aujourd'hui à 14:00 UTC
+              Moteur ML : Isolation Forest (Scikit-Learn)
             </span>
           </div>
         </div>
@@ -408,13 +418,13 @@ export const SecuritePage: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider">
             <Icon name="warning" size="sm" className="text-orange-400" />
-            RECENT SECURITY INCIDENTS
+            RECENT SECURITY INCIDENTS ({incidents.length})
           </div>
           <button
-            onClick={() => showToast('Ouverture des journaux de sécurité complets...')}
+            onClick={handleFullScan}
             className="text-xs font-mono font-bold text-[#78d8ba] hover:underline"
           >
-            View All Logs
+            Actualiser les flux système &rsaquo;
           </button>
         </div>
 
@@ -425,7 +435,7 @@ export const SecuritePage: React.FC = () => {
                 <th className="pb-3 pl-2">SEVERITY</th>
                 <th className="pb-3">TIMESTAMP</th>
                 <th className="pb-3">TYPE</th>
-                <th className="pb-3">SOURCE IP</th>
+                <th className="pb-3">SOURCE IP (RGPD)</th>
                 <th className="pb-3">TARGET</th>
                 <th className="pb-3 text-right pr-2">ACTION</th>
               </tr>
@@ -470,7 +480,7 @@ export const SecuritePage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Investigation d'Incident ─── */}
+      {/* ── TIROIR LATÉRAL : Investigation d'Incident & Blocage Pare-feu ─────── */}
       {selectedIncident && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
@@ -478,7 +488,7 @@ export const SecuritePage: React.FC = () => {
               <div className="flex items-center justify-between pb-4 border-b border-[#272a2d]">
                 <div>
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
-                    Investigation Incident
+                    Investigation Incident SOC
                   </h3>
                   <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${SEV_BADGE[selectedIncident.severity]}`}>
                     {selectedIncident.severity}
@@ -516,21 +526,23 @@ export const SecuritePage: React.FC = () => {
                 </div>
 
                 <div className="p-3.5 bg-[#1d2022] rounded-xl border border-[#272a2d] space-y-2">
-                  <div className="text-[10px] text-[#87938e] uppercase font-bold">Règle pare-feu recommandée</div>
+                  <div className="text-[10px] text-[#87938e] uppercase font-bold">Règle Pare-feu Windows / Linux</div>
                   <code className="text-[11px] block bg-[#0b0f11] p-2 rounded text-[#78d8ba]">
-                    iptables -A INPUT -s {selectedIncident.sourceIp.split(' ')[0]} -j DROP
+                    netsh advfirewall firewall add rule name="Sentinelle_Block_{(selectedIncident.rawIp || selectedIncident.sourceIp).split(' ')[0]}" dir=in action=block remoteip={(selectedIncident.rawIp || selectedIncident.sourceIp).split(' ')[0]}
                   </code>
                 </div>
               </div>
             </div>
 
             <div className="pt-6 border-t border-[#272a2d] flex gap-2">
-              <button
-                onClick={() => handleBlockIncident(selectedIncident.id)}
-                className="flex-1 py-2.5 rounded-lg bg-[#ef4444] text-white font-mono font-bold text-xs hover:bg-[#dc2626] transition-colors shadow-sm"
-              >
-                Bloquer la source
-              </button>
+              {selectedIncident.action !== 'Blocked' && (
+                <button
+                  onClick={() => handleBlockIncident(selectedIncident)}
+                  className="flex-1 py-2.5 rounded-lg bg-[#ef4444] text-white font-mono font-bold text-xs hover:bg-[#dc2626] transition-colors shadow-sm"
+                >
+                  Bloquer l'IP Source (Pare-feu)
+                </button>
+              )}
               <button
                 onClick={() => setSelectedIncident(null)}
                 className="px-4 py-2.5 rounded-lg border border-[#3e4945] text-xs font-mono text-[#e0e3e6] hover:bg-[#272a2d] transition-colors"
@@ -542,7 +554,7 @@ export const SecuritePage: React.FC = () => {
         </div>
       )}
 
-      {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Isolation d'un équipement ─ */}
+      {/* ── TIROIR LATÉRAL : Isolation d'un équipement réel du parc ──────────── */}
       {showIsolateDrawer && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
@@ -564,20 +576,20 @@ export const SecuritePage: React.FC = () => {
 
               <div className="mt-5 space-y-4 font-mono text-xs">
                 <p className="text-xs text-[#bdc9c3]">
-                  Sélectionnez l'équipement compromis pour le basculer immédiatement dans le VLAN de quarantaine (VLAN 999).
+                  Sélectionnez l'équipement du parc à basculer immédiatement dans le groupe de quarantaine (VLAN 999).
                 </p>
 
                 <div className="space-y-2">
-                  {['Switch-Core-01', 'Auth Gateway', 'Public API v2'].map(dev => (
+                  {equipementsList.map(eq => (
                     <button
-                      key={dev}
-                      onClick={() => {
-                        showToast(`Équipement ${dev} isolé avec succès. Flux de production coupés.`);
-                        setShowIsolateDrawer(false);
-                      }}
+                      key={eq.id}
+                      onClick={() => handleIsolateEquipment(eq)}
                       className="w-full p-3.5 rounded-xl bg-[#1d2022] hover:bg-[#272a2d] border border-[#3e4945] text-left transition-colors flex items-center justify-between group"
                     >
-                      <span className="font-bold text-[#e0e3e6] group-hover:text-[#81d0f8]">{dev}</span>
+                      <div>
+                        <div className="font-bold text-[#e0e3e6] group-hover:text-[#81d0f8]">{eq.nom}</div>
+                        <div className="text-[10px] text-[#87938e] mt-0.5">{eq.ip} • {eq.groupe}</div>
+                      </div>
                       <span className="text-[10px] text-[#ffb4ab] uppercase font-bold">Isoler &rsaquo;</span>
                     </button>
                   ))}

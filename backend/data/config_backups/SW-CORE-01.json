@@ -1,42 +1,92 @@
 [
   {
-    "ts": "2026-10-25T03:45:52.136696+00:00",
+    "ts": "2026-11-12T02:43:24.127250+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Restauration depuis sauvegarde du 2026-11-12T02:43",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T03:45:49.777878+00:00",
+    "ts": "2026-11-12T02:43:21.694299+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Remédiation CIS (CIS-1.1)",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T03:26:47.669903+00:00",
+    "ts": "2026-11-12T02:42:51.059594+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T03:26:45.326258+00:00",
+    "ts": "2026-11-12T02:42:33.242329+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T03:20:49.472310+00:00",
+    "ts": "2026-11-12T02:28:30.096440+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Restauration depuis sauvegarde du 2026-11-12T02:28",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T03:20:47.141368+00:00",
+    "ts": "2026-11-12T02:28:27.653349+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Remédiation CIS (CIS-1.1)",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T02:55:26.692383+00:00",
+    "ts": "2026-11-11T20:21:51.316835+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Restauration depuis sauvegarde du 2026-11-11T20:21",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T02:55:24.352871+00:00",
+    "ts": "2026-11-11T20:21:48.968290+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Remédiation CIS (CIS-1.1)",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T02:36:06.128945+00:00",
+    "ts": "2026-11-11T20:21:21.471415+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   },
   {
-    "ts": "2026-10-25T02:36:06.005818+00:00",
+    "ts": "2026-11-11T20:21:04.281523+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-11-10T22:26:17.784311+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Restauration depuis sauvegarde du 2026-11-10T22:26",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-11-10T22:26:17.682000+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Remédiation CIS (CIS-1.1)",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-11-10T22:13:50.631473+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-11-10T22:13:35.765195+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
+    "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
+  },
+  {
+    "ts": "2026-11-10T22:10:44.948480+00:00",
+    "sha256": "649541081d39923302759bf7c14d380f2063e88c282499a86d5061f4201639d5",
+    "comment": "Audit CIS Benchmark",
     "config": "version 15.2\nhostname SW-CORE-01\nservice password-encryption\nenable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0\n!\nip ssh version 2\nip http secure-server\n!\nntp server 192.168.1.1\nservice timestamps log datetime msec localtime show-timezone\nlogging host 192.168.1.254\nlogging trap informational\n!\nbanner motd ^C Authorized access only. ^C\n!\nline vty 0 4\n exec-timeout 10 0\n transport input ssh\n login local\n!\nno ip source-route\nno ip http server\n!\nsnmp-server community SNMP-BTS01 ro\n!\ninterface GigabitEthernet0/1\n no cdp enable\n ip access-group ACL-WAN in\n!\nip access-group ACL-WAN in\nend\n"
   }
 ]

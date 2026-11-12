@@ -4,9 +4,11 @@ import subprocess
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.app.core.config import settings
+from backend.app.core.scheduler import start_background_scheduler
 from backend.app.api.v1.router import api_router
 from backend.app.db.session import engine, SessionLocal, Base
 from backend.app.db.init_db import init_db
+from backend.app.modules.supervision.hardware_collector import HardwareCollector
 
 # Protection globale Windows : empêcher toute ouverture de fenêtre console (conhost/cmd)
 # par les sous-processus système ou bibliothèques tierces (joblib, sklearn, psutil, ping, arp)
@@ -21,13 +23,17 @@ if platform.system() == "Windows" and not getattr(subprocess.Popen, "_sentinelle
     subprocess.Popen.__init__ = _silent_popen_init  # type: ignore[method-assign]
     subprocess.Popen._sentinelle_no_window_patched = True  # type: ignore[attr-defined]
 
-# Création automatique des tables et initialisation du seed BTS au démarrage
+# Création automatique des tables et initialisation du seed BTS + hôte réel au démarrage
 Base.metadata.create_all(bind=engine)
 try:
     with SessionLocal() as _startup_db:
         init_db(_startup_db)
+        HardwareCollector.collect_live_metrics(_startup_db)
 except Exception:
     pass
+
+# Démarrage de l'ordonnanceur de collecte continue en arrière-plan
+start_background_scheduler()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

@@ -1,10 +1,11 @@
-"""Schémas Pydantic pour la supervision, les métriques et les prédictions TTF."""
+"""Schémas Pydantic pour la supervision, les métriques, les prédictions TTF et le cycle de vie des alertes."""
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
 
 class MetricOut(BaseModel):
+    """Représentation d'un point de mesure télémétrique."""
     id: int
     equipement_id: int
     type_metrique: str
@@ -15,6 +16,7 @@ class MetricOut(BaseModel):
 
 
 class MetricSeriesResponse(BaseModel):
+    """Série temporelle complète pour un équipement et un type de métrique."""
     equipement_id: int
     equipement_nom: str
     type_metrique: str
@@ -22,6 +24,7 @@ class MetricSeriesResponse(BaseModel):
 
 
 class PredictionOut(BaseModel):
+    """Résultat du modèle prédictif linéaire Time-To-Failure (TTF)."""
     id: int
     equipement_id: int
     equipement_nom: Optional[str] = None
@@ -38,11 +41,31 @@ class PredictionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AlerteOut(BaseModel):
+    """Schéma de sortie d'une alerte opérationnelle avec son état d'acquittement."""
+    id: int
+    equipement_id: Optional[int] = None
+    equipement_nom: Optional[str] = None
+    module_origine: str
+    severite: str
+    titre: str
+    message: str
+    statut: str
+    correlation_id: Optional[str] = None
+    date_creation: datetime
+    date_acquittement: Optional[datetime] = None
+    acquittee_par: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DiskStressRequest(BaseModel):
+    """Paramètres d'injection de test de charge disque."""
     equipement_id: int
     target_disk_percent: float = Field(default=89.0, ge=50.0, le=99.0)
     slope_boost: float = Field(default=2.5, ge=0.5, le=10.0)
 
 
 class ThresholdUpdateRequest(BaseModel):
+    """Mise à jour du seuil critique d'alerte disque d'un équipement."""
     seuil_disque_alerte: float = Field(ge=50.0, le=99.0)

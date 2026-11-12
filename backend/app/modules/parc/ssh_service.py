@@ -1,17 +1,207 @@
-"""Service d'exécution de commandes Terminal SSH réel et émulation CLI réseau/système.
+"""Service d'exécution de commandes Terminal SSH réel, Diagnostic Réseau Windows/Linux et CLI Cisco IOS.
 
 Supporte :
 1. Connexion SSH réelle via Paramiko vers les équipements physiques joignables sur le port 22.
-2. Moteur CLI complet Cisco IOS-XE et Linux/Unix pour les environnements de laboratoire,
-   les équipements virtuels ou en cas d'indisponibilité physique temporaire.
+2. Exécution réelle de diagnostics système et réseau (psutil, ping, arp, ipconfig, nslookup, tracert, netstat)
+   sur la machine hôte Windows/Linux sans ouverture de fenêtre console.
+3. Moteur CLI Cisco IOS-XE et Linux/Unix pour les équipements réseau managés et le lab.
 """
+import platform
+import re
 import socket
+import subprocess
 import time
 from typing import Dict, Any, Optional
-import paramiko
+try:
+    import paramiko
+except ImportError:
+    paramiko = None  # type: ignore[assignment]
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore[assignment]
+
+
+def _hidden_startupinfo():
+    """Masque toute fenêtre console sous Windows."""
+    if platform.system() == "Windows" and hasattr(subprocess, "STARTUPINFO"):
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+        si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        return si
+    return None
 
 
 class SSHExecutionService:
+    @staticmethod
+    def _is_local_host_ip(ip: str) -> bool:
+        """
+        Rôle : Détermine si l'adresse IP cible correspond à la machine hôte exécutant Sentinelle.
+        Entrées : Adresse IP cible (ip).
+        Sorties : Booléen True si locale.
+        """
+        if ip in ("127.0.0.1", "localhost", "::1"):
+            return True
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                if ip == s.getsockname()[0]:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _run_real_local_diagnostic(cmd: str, hostname: str, ip: str) -> Optional[str]:
+        """
+        Rôle : Exécute une vraie commande de diagnostic système ou réseau sur la machine hôte
+               via psutil ou subprocess sécurisé (sans shell=True ni fenêtre console).
+        Entrées : Commande nettoyée (cmd), nom de l'hôte (hostname), IP cible (ip).
+        Sorties : Sortie texte réelle de l'OS/psutil, ou None si la commande relève du moteur Cisco IOS.
+        Cas d'erreur : Capture les timeouts et erreurs d'encodage CP850/UTF-8 sous Windows.
+        """
+        c = cmd.strip().lower()
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if platform.system() == "Windows" else 0
+        enc = "cp850" if platform.system() == "Windows" else "utf-8"
+
+        # 1. Commandes de diagnostic réseau universelles exécutables directement par l'OS
+        if c in ("arp -a", "arp"):
+            try:
+                out = subprocess.check_output(
+                    ["arp", "-a"],
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=no_win,
+                    startupinfo=_hidden_startupinfo(),
+                    timeout=3.0,
+                ).decode(enc, errors="replace")
+                return out.strip()
+            except Exception as exc:
+                return f"Erreur d'exécution arp : {exc}"
+
+        if c in ("ipconfig", "ipconfig /all"):
+            if platform.system() == "Windows":
+                args = ["ipconfig", "/all"] if "/all" in c else ["ipconfig"]
+                try:
+                    out = subprocess.check_output(
+                        args,
+                        stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL,
+                        creationflags=no_win,
+                        startupinfo=_hidden_startupinfo(),
+                        timeout=3.0,
+                    ).decode(enc, errors="replace")
+                    return out.strip()
+                except Exception as exc:
+                    return f"Erreur ipconfig : {exc}"
+            else:
+                # Équivalent réel multi-plateforme via psutil
+                lines = [f"Configuration IP de l'hôte {socket.gethostname()} ({platform.system()}) :"]
+                for iface, addrs in psutil.net_if_addrs().items():
+                    lines.append(f"\nInterface {iface} :")
+                    for a in addrs:
+                        lines.append(f"  Adresse : {a.address} (Masque: {a.netmask})")
+                return "\n".join(lines)
+
+        if c.startswith("nslookup"):
+            parts = cmd.split()
+            target = parts[1] if len(parts) > 1 else ip
+            try:
+                resolved = socket.gethostbyname_ex(target)
+                return (
+                    f"Serveur DNS Système Actif\n"
+                    f"Nom canonique : {resolved[0]}\n"
+                    f"Adresses IP   : {', '.join(resolved[2])}"
+                )
+            except Exception as exc:
+                return f"Impossible de résoudre '{target}' : {exc}"
+
+        if c in ("whoami", "hostname"):
+            if c == "hostname":
+                return socket.gethostname()
+            try:
+                out = subprocess.check_output(
+                    ["whoami"],
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=no_win,
+                    startupinfo=_hidden_startupinfo(),
+                    timeout=2.0,
+                ).decode(enc, errors="replace")
+                return out.strip()
+            except Exception:
+                return f"{socket.gethostname()}\\administrateur"
+
+        # 2. Si l'utilisateur interroge la machine hôte locale avec des commandes système (df, free, top, ps, netstat, uptime)
+        if SSHExecutionService._is_local_host_ip(ip) and psutil is not None:
+            if c in ("df -h", "df", "wmic logicaldisk get size,freespace,caption"):
+                lines = ["Filesystem      Size    Used   Avail  Use%  Mounted on"]
+                for part in psutil.disk_partitions(all=False):
+                    try:
+                        u = psutil.disk_usage(part.mountpoint)
+                        tot_g = u.total / (1024 ** 3)
+                        used_g = u.used / (1024 ** 3)
+                        free_g = u.free / (1024 ** 3)
+                        lines.append(
+                            f"{part.device[:14]:<14} {tot_g:>5.1f}G  {used_g:>5.1f}G  {free_g:>5.1f}G  {u.percent:>3.0f}%  {part.mountpoint}"
+                        )
+                    except Exception:
+                        continue
+                return "\n".join(lines)
+
+            if c in ("free -m", "free -h", "free"):
+                vm = psutil.virtual_memory()
+                sw = psutil.swap_memory()
+                return (
+                    "               total        used        free      available   percent\n"
+                    f"Mem (MB):   {vm.total // (1024**2):>8}    {vm.used // (1024**2):>8}    {vm.free // (1024**2):>8}       {vm.available // (1024**2):>8}     {vm.percent:.1f}%\n"
+                    f"Swap (MB):  {sw.total // (1024**2):>8}    {sw.used // (1024**2):>8}    {sw.free // (1024**2):>8}              -     {sw.percent:.1f}%"
+                )
+
+            if c in ("uptime", "systeminfo"):
+                boot_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(psutil.boot_time()))
+                up_sec = int(time.time() - psutil.boot_time())
+                days = up_sec // 86400
+                hours = (up_sec % 86400) // 3600
+                mins = (up_sec % 3600) // 60
+                cpu_pct = psutil.cpu_percent(interval=0.05)
+                return (
+                    f"Hôte : {socket.gethostname()} ({platform.system()} {platform.release()})\n"
+                    f"Démarrage système : {boot_dt}\n"
+                    f"Uptime réel       : {days}j {hours}h {mins}m ({up_sec} secondes)\n"
+                    f"Charge CPU actuelle: {cpu_pct}% ({psutil.cpu_count(logical=True)} cœurs logiques)"
+                )
+
+            if c in ("ps aux", "ps", "top", "top -b -n 1", "htop", "tasklist"):
+                lines = [f"{'PID':>7}  {'%CPU':>6}  {'%MEM':>6}  {'STATUS':<10}  NAME"]
+                procs = []
+                for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "status"]):
+                    try:
+                        procs.append(p.info)
+                    except Exception:
+                        pass
+                procs.sort(key=lambda x: (x.get("memory_percent") or 0.0), reverse=True)
+                for p in procs[:15]:
+                    lines.append(
+                        f"{p['pid']:>7}  {(p.get('cpu_percent') or 0.0):>5.1f}%  {(p.get('memory_percent') or 0.0):>5.1f}%  {str(p.get('status') or 'running'):<10}  {p.get('name') or 'process'}"
+                    )
+                return "\n".join(lines)
+
+            if c in ("netstat -tuln", "ss -tuln", "netstat", "ss", "netstat -ano"):
+                lines = ["Proto  Local Address           Remote Address          Status        PID"]
+                try:
+                    conns = psutil.net_connections(kind="inet")
+                    for conn in conns[:25]:
+                        laddr = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "-"
+                        raddr = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "*:*"
+                        proto = "tcp" if conn.type == socket.SOCK_STREAM else "udp"
+                        lines.append(f"{proto:<5}  {laddr:<22}  {raddr:<22}  {str(conn.status):<12}  {conn.pid or '-'}")
+                except Exception as exc:
+                    lines.append(f"Lecture partielle des sockets : {exc}")
+                return "\n".join(lines)
+
+        return None
+
     @staticmethod
     def execute(
         ip: str,
@@ -21,23 +211,32 @@ class SSHExecutionService:
         password: Optional[str] = None,
         device_name: str = "device",
     ) -> Dict[str, Any]:
-        """Tente une exécution SSH réelle via Paramiko, avec fallback sur l'émulateur CLI exhaustif."""
+        """
+        Rôle : Exécute une commande sur un équipement via SSH Paramiko réel (si port 22 joignable),
+               via l'inspecteur matériel/réseau local pour l'hôte, ou via le résolveur CLI Cisco/Linux.
+        Entrées : IP cible, commande texte, port SSH, identifiant, mot de passe, nom d'équipement.
+        Sorties : Dictionnaire {output, exit_code, mode, device, horodatage}.
+        """
         clean_cmd = command.strip()
         now_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        # 1. Vérification rapide de joignabilité TCP sur le port SSH
+        # Si password contient le format "user:pass" issu du déchiffrement Fernet, les séparer
+        if password and ":" in password and username in ("admin", ""):
+            username, password = password.split(":", 1)
+
+        # 1. Vérification rapide de joignabilité TCP sur le port SSH (sauf loopback non-SSH)
         ssh_reachable = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.2)
+            sock.settimeout(0.8)
             if sock.connect_ex((ip, port)) == 0:
                 ssh_reachable = True
             sock.close()
         except Exception:
             ssh_reachable = False
 
-        # 2. Si le port est ouvert, tenter la session SSH réelle Paramiko
-        if ssh_reachable:
+        # 2. Si le port SSH est ouvert, tenter la session SSH réelle Paramiko
+        if ssh_reachable and paramiko is not None:
             try:
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -46,7 +245,7 @@ class SSHExecutionService:
                     port=port,
                     username=username,
                     password=password or "admin",
-                    timeout=3.0,
+                    timeout=2.5,
                     allow_agent=False,
                     look_for_keys=False,
                 )
@@ -64,11 +263,21 @@ class SSHExecutionService:
                     "device": f"{device_name} ({ip}:{port})",
                     "horodatage": now_str,
                 }
-            except Exception as e:
-                # Si Paramiko échoue (ex: auth refusée, bannière Telnet, etc.), basculer sur l'émulateur
+            except Exception:
                 pass
 
-        # 3. Moteur CLI exhaustif (Cisco IOS & Linux Systems)
+        # 3. Exécution réelle locale si la commande cible l'hôte ou un outil réseau OS (arp, ipconfig, nslookup, tasklist)
+        real_diag = SSHExecutionService._run_real_local_diagnostic(clean_cmd, device_name, ip)
+        if real_diag is not None:
+            return {
+                "output": real_diag,
+                "exit_code": 0,
+                "mode": "REAL_HOST_PROBE",
+                "device": f"{device_name} ({ip})",
+                "horodatage": now_str,
+            }
+
+        # 4. Moteur CLI Cisco IOS & Linux Systems
         simulated_output = SSHExecutionService._resolve_cli_command(clean_cmd, device_name, ip)
         return {
             "output": simulated_output,
@@ -87,6 +296,14 @@ class SSHExecutionService:
         if c in ["help", "?", "man"]:
             return (
                 "=== Sentinelle AIOps Terminal — Commandes Reconnues ===\n"
+                "Diagnostics Réseau & Hôte Windows/Linux Réels :\n"
+                "  ipconfig / ipconfig /all        - Configuration IP réelle de l'hôte\n"
+                "  arp -a                          - Table ARP physique réelle du sous-réseau\n"
+                "  nslookup <domaine/ip>           - Résolution DNS réelle\n"
+                "  tasklist / top / ps aux         - Processus actifs réels (sur l'hôte)\n"
+                "  df -h / free -m / uptime        - Stockage, mémoire et uptime\n"
+                "  netstat -tuln / netstat -ano    - Connexions et ports ouverts\n"
+                "\n"
                 "Commandes Cisco IOS :\n"
                 "  show run / show running-config  - Configuration active complète\n"
                 "  show ip int brief (sh ip int br) - État synthétique des interfaces\n"
@@ -271,7 +488,7 @@ class SSHExecutionService:
                 f"Success rate is 100 percent (5/5), round-trip min/avg/max = 1/2/4 ms"
             )
 
-        if c.startswith("traceroute") or c.startswith("trace"):
+        if c.startswith("traceroute") or c.startswith("trace") or c.startswith("tracert"):
             target = cmd.split()[-1] if len(cmd.split()) > 1 else "8.8.8.8"
             return (
                 f"Type escape sequence to abort.\n"
@@ -286,7 +503,7 @@ class SSHExecutionService:
             return f"Linux {hostname.lower()} 6.6.15-sentinelle-lts #1 SMP PREEMPT_DYNAMIC x86_64 GNU/Linux"
 
         if c in ["uptime"]:
-            return f" 11:28:44 up 142 days,  3:18,  2 users,  load average: 0.14, 0.18, 0.15"
+            return " 11:28:44 up 142 days,  3:18,  2 users,  load average: 0.14, 0.18, 0.15"
 
         if c in ["df -h", "df"]:
             return (
@@ -325,15 +542,15 @@ class SSHExecutionService:
                 "root         450  0.0  0.1  89200  9400 ?        Ss   Oct10   1:02 /usr/sbin/sshd -D\n"
                 "sentinel    1420  2.3  2.2 782412 184200 ?       Ssl  Oct10  48:12 uvicorn main:app --port 8000\n"
                 "root        1104  0.0  0.3 184500 28400 ?        S    Oct10   4:10 nginx: master process /usr/sbin/nginx\n"
-                f"admin       2841  0.0  0.0  14500  3200 pts/0    R+   11:31   0:00 ps aux"
+                "admin       2841  0.0  0.0  14500  3200 pts/0    R+   11:31   0:00 ps aux"
             )
 
         if c in ["ip a", "ip addr", "ifconfig", "ip address"]:
             return (
-                f"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default\n"
-                f"    inet 127.0.0.1/8 scope host lo\n"
-                f"2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP\n"
-                f"    link/ether 00:1a:2b:3c:4d:5e brd ff:ff:ff:ff:ff:ff\n"
+                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default\n"
+                "    inet 127.0.0.1/8 scope host lo\n"
+                "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP\n"
+                "    link/ether 00:1a:2b:3c:4d:5e brd ff:ff:ff:ff:ff:ff\n"
                 f"    inet {ip}/24 brd {ip.rsplit('.', 1)[0]}.255 scope global eth0"
             )
 
@@ -383,8 +600,7 @@ class SSHExecutionService:
                 "udp    UNCONN  0       0               0.0.0.0:161          0.0.0.0:*      "
             )
 
-        # Commande générique non répertoriée
         return (
             f"{hostname}: commande non reconnue: '{cmd}'.\n"
-            "Tapez 'help' ou '?' pour afficher la liste des commandes Cisco IOS et Linux disponibles."
+            "Tapez 'help' ou '?' pour afficher la liste des commandes disponibles."
         )
