@@ -87,17 +87,17 @@ async def test_assistant_chat_async():
         db.close()
 
 
-def test_api_assistant_endpoints():
+def test_api_assistant_endpoints(visiteur_headers):
     """Vérifie les points de terminaison REST de l'API Assistant IA."""
     # 1. Questions suggérées
-    resp_prompts = client.get("/api/v1/assistant/suggested-prompts")
+    resp_prompts = client.get("/api/v1/assistant/suggested-prompts", headers=visiteur_headers)
     assert resp_prompts.status_code == 200
     prompts = resp_prompts.json()
     assert len(prompts) >= 4
 
     # 2. Chat POST
     payload = {"message": "Donne-moi une synthèse globale du parc"}
-    resp_chat = client.post("/api/v1/assistant/chat", json=payload)
+    resp_chat = client.post("/api/v1/assistant/chat", json=payload, headers=visiteur_headers)
     assert resp_chat.status_code == 200
     data = resp_chat.json()
     assert "response" in data

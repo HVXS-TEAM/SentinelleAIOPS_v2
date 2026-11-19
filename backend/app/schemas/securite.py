@@ -23,15 +23,9 @@ class EvenementSecuriteOut(BaseModel):
 
 
 class AnalyzeBatchRequest(BaseModel):
-    """Lot de lignes de journaux à soumettre au moteur Isolation Forest."""
+    """Lot de lignes de journaux (sshd, Cisco IOS) à analyser, sans enregistrement."""
     equipement_id: Optional[int] = None
-    logs: List[str] = Field(description="Liste de lignes de journal auth.log, Windows EventLog ou Syslog à analyser")
-
-
-class BruteForceSimulationRequest(BaseModel):
-    """Requête d'injection de test d'intrusion SSH pour vérification de la corrélation."""
-    equipement_id: int
-    attacker_ip: str = "198.51.100.45"
+    logs: List[str] = Field(description="Lignes de journal sshd (auth.log, journald) ou Cisco IOS (%SEC_LOGIN) à analyser")
 
 
 class BlockIpRequest(BaseModel):
@@ -54,7 +48,14 @@ class SecurityStatsResponse(BaseModel):
     total_evenements: int
     total_anomalies: int
     attaques_critiques: int
-    taux_precision_ia: float
-    baseline_accord_pct: float
+    ips_bloquees: int = 0
+    modele_actif: str = "regles_statiques"
+    echantillons_baseline: int = 0
+    echantillons_requis: int = 0
+    evenements_par_source: Dict[str, int] = Field(default_factory=dict)
+    derniere_observation: Optional[datetime] = None
+    syslog_actif: bool = False
+    syslog_datagrammes_recus: int = 0
+    syslog_ignores_source_inconnue: int = 0
     connexions_actives_hote: int = 0
     ports_ecoute_hote: int = 0

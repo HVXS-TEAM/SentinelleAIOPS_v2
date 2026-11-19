@@ -62,28 +62,6 @@ const QUICK_PROMPTS = [
   { id: 'qp3', label: 'Résumé des alertes critiques', iconName: 'description' },
 ];
 
-/* ── Table de démo de la maquette de référence ───────────────────────────── */
-const DEMO_PREDICTIVE_SERVERS = [
-  {
-    name: 'APP-SRV-01',
-    isCritical: true,
-    date: 'Jeu. 14 Nov, 02:00',
-    usage: '88.4%',
-  },
-  {
-    name: 'DB-CLUSTER-M1',
-    isCritical: false,
-    date: 'Ven. 15 Nov, 18:30',
-    usage: '86.1%',
-  },
-  {
-    name: 'STO-NODE-04',
-    isCritical: false,
-    date: 'Sam. 16 Nov, 09:15',
-    usage: '85.0%',
-  },
-];
-
 export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNavigateTab }) => {
   /* La discussion démarre vide pour un accueil élégant et personnalisé à la ChatGPT / Gemini */
   const [messages, setMessages] = useState<Message[]>([]);
@@ -99,21 +77,13 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNav
   })();
 
   const getDisplayName = (): string => {
-    if (!user) return 'Jamel';
-    const fullName = user.nom_complet || user.identifiant;
-    if (fullName.includes('Jamel') || fullName.includes('Edwin')) return 'Jamel';
-    if (fullName.toLowerCase().includes('admin') || user.identifiant === 'admin') return 'Jamel';
-    if (fullName.includes('Sarah')) return 'Sarah';
-    if (fullName.includes('David')) return 'David';
-    if (fullName.includes('Ellen')) return 'Ellen';
-    return fullName.split(' ')[0] || 'Jamel';
+    if (!user) return '';
+    const source = (user.nom_complet || user.identifiant || '').trim();
+    return source.split(' ')[0] || '';
   };
 
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [showCleanupModal, setShowCleanupModal] = useState(false);
-  const [cleanupStep, setCleanupStep] = useState<'idle' | 'running' | 'done'>('idle');
-  const [cleanupLogs, setCleanupLogs] = useState<string[]>([]);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,26 +121,6 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNav
     setMessages([]);
   };
 
-  /* Lancement de l'action de nettoyage de logs (Remédiation AIOps v1) */
-  const handleStartCleanup = () => {
-    setShowCleanupModal(true);
-    setCleanupStep('running');
-    setCleanupLogs([
-      'Connexion SSH agentifiée vers APP-SRV-01 (10.0.10.20)...',
-      'Vérification des points de montage : /var/log saturé à 88.4% (58.2 Go).',
-      'Arrêt temporaire du flux de rotation de logs.',
-      'Compression et archivage des logs archivés > 14 jours...',
-      'Purge sécurisée des fichiers temporaires /tmp/app_cache_*...',
-      'Nettoyage des conteneurs orphelins et caches Docker dind...',
-      'Recalcul du stockage : Espace libéré = 18.4 Go (Nouveau taux : 58.1%).',
-      'Validation de santé : Système stable et nominal ✓',
-    ]);
-
-    setTimeout(() => {
-      setCleanupStep('done');
-    }, 2200);
-  };
-
   /* Génération de réponse contextuelle via API et RAG */
   const handleSendPrompt = async (textToSend?: string) => {
     const query = (textToSend || input).trim();
@@ -196,7 +146,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNav
           role: 'assistant',
           content: answerText,
           timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-          sources: apiRes.sources || ['Base de données Sentinelle'],
+          sources: apiRes.sources || [],
           suggestedFollowups: apiRes.suggested_followups || [],
           mode: apiRes.mode || 'rag_local',
         };
@@ -205,78 +155,21 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({ currentUser, onNav
         return;
       }
     } catch {
-      // Repli fluide vers le mode heuristique local
+      /* échec traité ci-dessous */
     }
 
-    setTimeout(() => {
-      let aiContent: string;
-      let sources = ['RAG Local Sentinelle'];
-      let followups = ['Quels sont les équipements en alerte ?', 'Quel est le score CIS des équipements ?'];
-      const q = query.toLowerCase();
-
-      if (q.includes('saturation') || q.includes('disque') || q.includes('ttf') || q.includes('serveur')) {
-        sources = ['Supervision Prédictive TTF', 'Collecteur SNMP', 'sentinelle.db'];
-        followups = ['Proposer un nettoyage automatique des logs', 'Comment sont calculées les prédictions TTF ?'];
-        const aiResponse: Message = {
-          id: `a-${Date.now()}`,
-          role: 'assistant',
-          content: null, // Déclenche le tableau des serveurs avec bouton Proposer nettoyage
-          timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-          sources,
-          suggestedFollowups: followups,
-          mode: 'rag_local',
-        };
-        setMessages(prev => [...prev, aiResponse]);
-        setIsTyping(false);
-        return;
-      } else if (q.includes('trafic') || q.includes('réseau') || q.includes('qos')) {
-        sources = ['Supervision Télémétrie', 'NetFlow / sFlow'];
-        followups = ['Voir les alertes associées au pic de trafic', 'Limiter la bande passante sur CORE-RTR-01'];
-        aiContent = 
-`### Analyse du Trafic Réseau & Liens Inter-Datacenter
-
-L'inspection en temps réel du trafic NetFlow / sFlow montre un pic anormal sur le lien d'interconnexion :
-- [CRITIQUE] **CORE-RTR-01 → DIST-SW-A** : **2.4 Gbps** (Capacité nominale : 2.5 Gbps, saturation à 96%).
-- [MAJEUR] **Flux prédominant** : \`TCP/443\` (Synchronisation continue des bases de données inter-DC).
-- [CONFORME] **Recommandation QoS** : Activation immédiate d'une limitation de bande passante par classe de service.`;
-      } else if (q.includes('conformité') || q.includes('cis') || q.includes('benchmark')) {
-        sources = ['NetDevOps CIS Benchmark', 'Cisco IOS 15'];
-        followups = ['Comment corriger les failles de DIST-SW-A ?', 'Sauvegarder les configurations actives'];
-        aiContent = 
-`### Audit de Conformité CIS Benchmark Cisco IOS
-
-Résultat synthétique du dernier audit de durcissement sur vos commutateurs et routeurs :
-- [CONFORME] **FW-EXT-02** (Firewall) : **100% de conformité** (0 violation).
-- [ATTENTION] **CORE-RTR-01** (Routeur Core) : **82% de conformité** (2 violations mineures).
-- [NON-CONFORME] **DIST-SW-A** (Switch Distribution) : **65% de conformité** (5 violations critiques).
-
-**[ALERTE - AUDIT CIS] Vulnérabilités majeures détectées sur DIST-SW-A :**
-- [CRITIQUE - CIS 1.1.1] Ligne VTY avec mot de passe en clair (\`cisco\`).
-- [CRITIQUE - CIS 1.2.2] Protocole Telnet actif sans SSH imposé (\`transport input all\`).`;
-      } else {
-        sources = ['Gestion de Parc', 'Supervision TTF', 'Sécurité'];
-        aiContent = 
-`### Synthèse Globale Sentinelle AIOps
-
-Analyse contextuelle de votre infrastructure :
-- **Équipements supervisés** : 3 nœuds actifs, 1 nécessitant une attention urgente (DIST-SW-A).
-- **Prédictions TTF** : 3 serveurs surveillés avec risque de saturation disque d'ici fin de semaine.
-- **Cybersécurité** : Modèle Isolation Forest actif avec masquage RGPD conforme CNIL.`;
-      }
-
-      const aiResponse: Message = {
+    // Le serveur n'a pas répondu : on le dit, on n'invente aucune réponse.
+    setMessages(prev => [
+      ...prev,
+      {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: aiContent,
+        content: "L'assistant n'a pas pu répondre : le serveur est injoignable ou a refusé la demande. Réessayez dans un instant ; aucune réponse de substitution n'est générée.",
         timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        sources,
-        suggestedFollowups: followups,
-        mode: 'rag_local',
-      };
-
-      setMessages(prev => [...prev, aiResponse]);
-      setIsTyping(false);
-    }, 600);
+        mode: 'erreur',
+      },
+    ]);
+    setIsTyping(false);
   };
 
   /* Filtrage strict : conversion des émojis en tags cliniques normalisés et purge Unicode */
@@ -520,7 +413,7 @@ Analyse contextuelle de votre infrastructure :
 
             {/* Formule de politesse & Salutation chaleureuse au prénom */}
             <h1 className="text-xl sm:text-2xl font-extrabold text-[#e0e3e6] mb-1 tracking-tight assistant-hero-title">
-              Bonjour <span className="text-[#78d8ba]">{getDisplayName()}</span>, que voulez-vous faire aujourd'hui ?
+              Bonjour{getDisplayName() ? ' ' : ''}<span className="text-[#78d8ba]">{getDisplayName()}</span>, que voulez-vous faire aujourd'hui ?
             </h1>
             <p className="text-xs sm:text-sm text-[#87938e] max-w-xl mx-auto mb-4 leading-relaxed assistant-hero-subtitle">
               Je suis tout à vous pour superviser l'infrastructure, auditer les configurations Cisco ou corréler les alertes de sécurité en temps réel. Par quoi commençons-nous ?
@@ -591,78 +484,7 @@ Analyse contextuelle de votre infrastructure :
 
                 <div className="flex-1 space-y-3">
                   <div className="bg-[#1d2022] border border-[#3e4945]/40 rounded-2xl rounded-tl-sm px-6 py-5 shadow-sm assistant-ai-bubble">
-                    {msg.content ? (
-                      renderAssistantMessage(msg.content, msg.id)
-                    ) : (
-                      /* Tableau prédictif identique à screen.png */
-                      <>
-                        <p className="text-[15px] text-[#dfe4e0] mb-4 leading-relaxed">
-                          D'après l'analyse prédictive des tendances de consommation, 3 serveurs présentent un risque élevé de saturation disque ( &gt;90%) d'ici la fin de la semaine :
-                        </p>
-
-                        <div className="bg-[#181d1b] border border-[#3e4945]/40 rounded-lg overflow-hidden mt-4">
-                          {/* Header du tableau */}
-                          <div className="grid grid-cols-12 gap-2 bg-[#1c211e] px-4 py-2.5 border-b border-[#3e4945]/30">
-                            <div className="col-span-5 text-[11px] font-bold text-[#bdc9c3] uppercase tracking-wider">
-                              SERVEUR
-                            </div>
-                            <div className="col-span-4 text-[11px] font-bold text-[#bdc9c3] uppercase tracking-wider">
-                              DATE PRÉVUE
-                            </div>
-                            <div className="col-span-3 text-[11px] font-bold text-[#bdc9c3] uppercase tracking-wider text-right">
-                              USAGE ACTUEL
-                            </div>
-                          </div>
-
-                          {/* Lignes du tableau */}
-                          <div className="divide-y divide-[#3e4945]/20 font-mono text-xs">
-                            {DEMO_PREDICTIVE_SERVERS.map(srv => (
-                              <div
-                                key={srv.name}
-                                className={`grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-[#262b29]/50 transition-colors ${
-                                  srv.isCritical ? 'bg-[#ffb4ab]/5' : ''
-                                }`}
-                              >
-                                <div
-                                  className={`col-span-5 font-semibold flex items-center gap-2 ${
-                                    srv.isCritical ? 'text-[#ffb4ab]' : 'text-[#78d8ba]'
-                                  }`}
-                                >
-                                  {srv.isCritical ? (
-                                    <Icon name="warning" size="sm" className="text-[#ffb4ab] animate-pulse" />
-                                  ) : (
-                                    <Icon name="dns" size="sm" className="text-[#78d8ba]" />
-                                  )}
-                                  <span>{srv.name}</span>
-                                </div>
-                                <div className="col-span-4 text-[#dfe4e0] font-sans">
-                                  {srv.date}
-                                </div>
-                                <div
-                                  className={`col-span-3 font-bold text-right ${
-                                    srv.isCritical ? 'text-[#ffb4ab]' : 'text-[#78d8ba]'
-                                  }`}
-                                >
-                                  {srv.usage}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Bouton d'action sous la réponse */}
-                        <div className="mt-4 flex gap-3">
-                          <button
-                            id="assistant-propose-cleanup-btn"
-                            onClick={handleStartCleanup}
-                            className="bg-[#1F8A70]/15 border border-[#1F8A70]/40 text-[#78d8ba] hover:bg-[#1F8A70]/30 text-xs px-4 py-2 rounded uppercase tracking-wider transition-all flex items-center gap-2 font-bold shadow-sm cursor-pointer"
-                          >
-                            <Icon name="build" size="xs" />
-                            <span>Proposer nettoyage</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
+                    {renderAssistantMessage(msg.content, msg.id)}
 
                     {/* Sources RAG citées */}
                     {msg.sources && msg.sources.length > 0 && (
@@ -680,7 +502,7 @@ Analyse contextuelle de votre infrastructure :
                           </span>
                         ))}
                         <span className="ml-auto px-2 py-0.5 rounded bg-[#78d8ba]/10 text-[#78d8ba] border border-[#78d8ba]/30 font-bold uppercase tracking-wider assistant-mode-pill">
-                          {msg.mode === 'ollama' ? '● Ollama LLM' : '● RAG Local Souverain'}
+                          {msg.mode === 'ollama' ? '● Ollama LLM' : '● RAG local'}
                         </span>
                       </div>
                     )}
@@ -829,65 +651,6 @@ Analyse contextuelle de votre infrastructure :
         </div>
       </div>
 
-      {/* ── Modal : Automatisation de Nettoyage de Disque (v1) ─────────── */}
-      {showCleanupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col">
-            {/* Header modal */}
-            <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-[#78d8ba]/10 border border-[#78d8ba]/30 flex items-center justify-center text-[#78d8ba]">
-                  <Icon name="delete" size="sm" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-[#dfe4e0]">
-                    Planification Nettoyage Disque AIOps
-                  </h3>
-                  <p className="text-[10px] text-[#bdc9c3] font-mono">
-                    Cible : APP-SRV-01 (10.0.10.20)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowCleanupModal(false)}
-                className="text-[#bdc9c3] hover:text-[#dfe4e0] p-1 rounded hover:bg-[#262b29] transition-colors"
-              >
-                <Icon name="close" size="sm" />
-              </button>
-            </div>
-
-            {/* Corps du modal */}
-            <div className="p-4 space-y-3">
-              <div className="bg-[#0a0f0d] border border-[#3e4945]/60 rounded-lg p-3 font-mono text-xs text-[#78d8ba] h-48 overflow-y-auto space-y-1">
-                {cleanupLogs.map((line, idx) => (
-                  <div key={idx} className="leading-relaxed">
-                    <span className="text-[#bdc9c3]/50">[{idx + 1}]</span> {line}
-                  </div>
-                ))}
-              </div>
-
-              {cleanupStep === 'done' && (
-                <div className="p-3 bg-[#3da186]/10 border border-[#3da186]/30 rounded-lg flex items-center gap-2 text-xs text-[#78d8ba]">
-                  <Icon name="check_circle" size="sm" className="shrink-0" />
-                  <span>
-                    Remédiation terminée avec succès : 18.4 Go récupérés. Le serveur est désormais à 58.1% d'usage.
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Footer modal */}
-            <div className="px-4 py-3 bg-[#1c211e] border-t border-[#3e4945] flex justify-end gap-2">
-              <button
-                onClick={() => setShowCleanupModal(false)}
-                className="px-4 py-1.5 rounded bg-[#262b29] border border-[#3e4945] text-xs text-[#dfe4e0] hover:bg-[#313633] transition-colors font-medium"
-              >
-                {cleanupStep === 'done' ? 'Fermer' : 'Annuler'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

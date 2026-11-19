@@ -35,6 +35,15 @@ def test_record_metric_and_ttf_calculation():
     srv = db.query(Equipement).filter(Equipement.nom == "SRV-APP-01").first()
     assert srv is not None
 
+    # Historique réel de test : remplissage disque croissant sur 24 h (dans la base temporaire)
+    from datetime import datetime, timedelta, timezone
+    from backend.app.db.models import Metrique
+    now = datetime.now(timezone.utc)
+    for i in range(24, 0, -1):
+        db.add(Metrique(equipement_id=srv.id, type_metrique="disk_percent",
+                        valeur=round(65.0 + (24 - i) * 0.8, 1), horodatage=now - timedelta(hours=i)))
+    db.commit()
+
     # Enregistrement métrique
     metric = SupervisionService.record_metric(db, srv.id, "disk_percent", 85.0)
     assert metric.valeur == 85.0
@@ -82,26 +91,6 @@ def test_api_metrics_and_predictions_endpoints():
     assert resp_pred.status_code == 200
     preds = resp_pred.json()
     assert len(preds) > 0
-
-
-def test_api_simulation_stress_demo():
-    """Vérifie le déclenchement en 1 clic de la simulation de stress disque pour la soutenance."""
-    token = get_auth_token("admin")
-    headers = {"Authorization": f"Bearer {token}"}
-
-    db = SessionLocal()
-    srv = db.query(Equipement).filter(Equipement.nom == "SRV-APP-01").first()
-    db.close()
-
-    resp_sim = client.post(
-        "/api/v1/supervision/simulate-stress",
-        json={"equipement_id": srv.id, "target_disk_percent": 91.5, "slope_boost": 3.0},
-        headers=headers,
-    )
-    assert resp_sim.status_code == 200
-    sim_data = resp_sim.json()
-    assert sim_data["valeur_actuelle"] >= 90.0
-    assert sim_data["ttf_estime_heures"] is not None
 
 
 def test_hardware_collector_service():

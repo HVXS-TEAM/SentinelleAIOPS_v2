@@ -33,7 +33,7 @@ def _job_collect_host_metrics() -> None:
         with SessionLocal() as db:
             HardwareCollector.collect_live_metrics(db)
     except Exception as exc:
-        logger.debug("Erreur lors de la collecte périodique hôte : %s", exc)
+        logger.warning("Erreur lors de la collecte périodique hôte : %s", exc)
 
 
 def _job_probe_network_parc() -> None:
@@ -44,7 +44,7 @@ def _job_probe_network_parc() -> None:
         with SessionLocal() as db:
             ParcService.probe_all_equipments(db)
     except Exception as exc:
-        logger.debug("Erreur lors du sondage périodique du parc : %s", exc)
+        logger.warning("Erreur lors du sondage périodique du parc : %s", exc)
 
 
 def _job_purge_old_metrics() -> None:
@@ -55,7 +55,19 @@ def _job_purge_old_metrics() -> None:
         with SessionLocal() as db:
             SupervisionService.purge_old_metrics(db, retention_days=30)
     except Exception as exc:
-        logger.debug("Erreur lors de la purge périodique SQLite : %s", exc)
+        logger.warning("Erreur lors de la purge périodique SQLite : %s", exc)
+
+
+def _job_security_scan() -> None:
+    """
+    Rôle : Lit les journaux d'authentification de l'hôte puis analyse la fenêtre courante (détection d'intrusion).
+    """
+    try:
+        from backend.app.modules.securite.service import SecurityService
+        with SessionLocal() as db:
+            SecurityService.run_real_security_scan(db, audit=False)
+    except Exception as exc:
+        logger.warning("Erreur lors de l'analyse périodique de sécurité : %s", exc)
 
 
 def start_background_scheduler() -> None:
@@ -100,10 +112,19 @@ def start_background_scheduler() -> None:
                 replace_existing=True,
                 max_instances=1,
             )
+            from backend.app.core.config import settings
+            scheduler.add_job(
+                _job_security_scan,
+                "interval",
+                minutes=settings.SECURITY_SCAN_INTERVAL_MINUTES,
+                id="security_log_analysis",
+                replace_existing=True,
+                max_instances=1,
+            )
             scheduler.start()
             _scheduler_instance = scheduler
         except Exception as exc:
-            logger.debug("APScheduler non démarré : %s", exc)
+            logger.warning("APScheduler non démarré : %s", exc)
 
 
 def stop_background_scheduler() -> None:
@@ -115,7 +136,7 @@ def stop_background_scheduler() -> None:
         if _scheduler_instance is not None:
             try:
                 _scheduler_instance.shutdown(wait=False)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Arrêt du planificateur en échec : %s", exc)
             _scheduler_instance = None
 

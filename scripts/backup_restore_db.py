@@ -1,6 +1,6 @@
 """Script de sauvegarde, restauration et validation de PRA (Plan de Reprise d'Activité).
 
-Conformité BTS SIO SISR — Continuité de service & intégrité des données.
+Continuité de service et intégrité des données.
 """
 import os
 import shutil

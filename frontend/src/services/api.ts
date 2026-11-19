@@ -1,15 +1,5 @@
 import axios from 'axios';
-import type {
-  AuthResponse,
-  RegisterData,
-  Equipement,
-  MetricSeries,
-  Prediction,
-  Alerte,
-  LocalNetworkInfo,
-  RealNetworkScanResponse,
-  HardwareLiveStats,
-} from '../types';
+import type { AuthResponse, RegisterData, Equipement, MetricSeries, Prediction, Alerte, LocalNetworkInfo, RealNetworkScanResponse, HardwareLiveStats, MfaSetupResponse, SetupStatus, SetupData, ForgotPasswordResponse, ResetCodeResponse } from '../types';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
@@ -32,8 +22,31 @@ export const SESSION_KEYS = {
 
 export const SESSION_EXPIRED_EVENT = 'sentinelle:session-expired';
 
-export const clearSession = (): void => {
-  Object.values(SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+const CLE_THEME = 'sentinelle_theme_preference';
+
+/** Efface toutes les données propres au compte précédent (jeton, profil, préférences d'interface,
+ *  brouillons). Seule la préférence de thème, liée au poste, est conservée. */
+export const clearPersonalData = (): void => {
+  try {
+    Object.values(SESSION_KEYS).forEach(key => localStorage.removeItem(key));
+    for (const store of [localStorage, sessionStorage]) {
+      Object.keys(store)
+        .filter(k => (k.startsWith('sentinelle_') && k !== CLE_THEME) || k.startsWith('netdevops:'))
+        .forEach(k => store.removeItem(k));
+    }
+  } catch {
+    /* stockage indisponible : rien à effacer */
+  }
+};
+
+export const clearSession = (): void => clearPersonalData();
+
+/** Ouvre une session : les données du compte précédent sont effacées avant d'enregistrer le nouveau jeton. */
+const startSession = (data: AuthResponse): void => {
+  if (!data.access_token) return;
+  clearPersonalData();
+  localStorage.setItem(SESSION_KEYS.token, data.access_token);
+  localStorage.setItem(SESSION_KEYS.user, JSON.stringify(data));
 };
 
 // Injection automatique du jeton JWT dans les requêtes sortantes
@@ -62,20 +75,39 @@ apiClient.interceptors.response.use(
 
 // Services d'authentification
 export const authService = {
-  login: async (identifiant: string, mot_de_passe: string): Promise<AuthResponse> => {
-    const response = await apiClient.post<AuthResponse>('/auth/login', { identifiant, mot_de_passe });
-    if (response.data.access_token) {
-      localStorage.setItem(SESSION_KEYS.token, response.data.access_token);
-      localStorage.setItem(SESSION_KEYS.user, JSON.stringify(response.data));
-    }
+  login: async (identifiant: string, mot_de_passe: string, code_mfa?: string): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/auth/login', {
+      identifiant,
+      mot_de_passe,
+      ...(code_mfa ? { code_mfa } : {}),
+    });
+    startSession(response.data);
     return response.data;
   },
   register: async (data: RegisterData): Promise<AuthResponse> => {
     const response = await apiClient.post<AuthResponse>('/auth/register', data);
-    if (response.data.access_token) {
-      localStorage.setItem(SESSION_KEYS.token, response.data.access_token);
-      localStorage.setItem(SESSION_KEYS.user, JSON.stringify(response.data));
-    }
+    startSession(response.data);
+    return response.data;
+  },
+  getSetupStatus: async (): Promise<SetupStatus> => {
+    const response = await apiClient.get<SetupStatus>('/auth/setup-status');
+    return response.data;
+  },
+  setup: async (data: SetupData): Promise<AuthResponse> => {
+    const response = await apiClient.post<AuthResponse>('/auth/setup', data);
+    startSession(response.data);
+    return response.data;
+  },
+  forgotPassword: async (identifiant: string): Promise<ForgotPasswordResponse> => {
+    const response = await apiClient.post<ForgotPasswordResponse>('/auth/forgot-password', { identifiant });
+    return response.data;
+  },
+  resetPassword: async (identifiant: string, code: string, nouveau_mot_de_passe: string): Promise<{ reset: boolean }> => {
+    const response = await apiClient.post('/auth/reset-password', { identifiant, code, nouveau_mot_de_passe });
+    return response.data;
+  },
+  changePassword: async (mot_de_passe_actuel: string, nouveau_mot_de_passe: string): Promise<{ changed: boolean }> => {
+    const response = await apiClient.post('/auth/change-password', { mot_de_passe_actuel, nouveau_mot_de_passe });
     return response.data;
   },
   logout: async () => {
@@ -116,14 +148,6 @@ export const supervisionService = {
   recalculateTTF: async (equipementId: number, metrique = 'disk_percent'): Promise<Prediction> => {
     const response = await apiClient.post<Prediction>(`/supervision/recalculate/${equipementId}`, null, {
       params: { metrique },
-    });
-    return response.data;
-  },
-  simulateStress: async (equipementId: number, targetDiskPercent = 91.0): Promise<Prediction> => {
-    const response = await apiClient.post<Prediction>('/supervision/simulate-stress', {
-      equipement_id: equipementId,
-      target_disk_percent: targetDiskPercent,
-      slope_boost: 3.0,
     });
     return response.data;
   },
@@ -190,10 +214,9 @@ export const parcService = {
     const response = await apiClient.post<Equipement>(`/parc/equipements/${equipementId}/probe`);
     return response.data;
   },
-  scanSnmp: async (plageIp = '192.168.1.0/24', simulerRogue = false) => {
+  scanSnmp: async (plageIp: string) => {
     const response = await apiClient.post('/parc/scan-snmp', {
       plage_ip: plageIp,
-      simuler_rogue_device: simulerRogue,
     });
     return response.data;
   },
@@ -282,31 +305,23 @@ export const securiteService = {
     const response = await apiClient.get('/securite/stats');
     return response.data;
   },
-  simulateBruteforce: async (equipementId: number, attackerIp = '198.51.100.45') => {
-    const response = await apiClient.post('/securite/simulate-bruteforce', {
-      equipement_id: equipementId,
-      attacker_ip: attackerIp,
-    });
+  scanRealSecurity: async () => {
+    const response = await apiClient.post('/securite/scan-real');
     return response.data;
   },
-  scanRealSecurity: async (equipementId?: number) => {
-    const response = await apiClient.post('/securite/scan-real', null, {
-      params: equipementId ? { equipement_id: equipementId } : {},
-    });
-    return response.data;
-  },
-  blockIp: async (ip: string, equipementId?: number, reason = 'Blocage manuel opérateur SOC') => {
+  blockIp: async (ip: string, incidentId?: number, motif = 'Blocage manuel opérateur SOC') => {
     const response = await apiClient.post('/securite/block-ip', {
-      ip,
-      equipement_id: equipementId,
-      reason,
+      source_ip: ip,
+      incident_id: incidentId,
+      motif,
     });
     return response.data;
   },
-  isolateDevice: async (equipementId: number, reason = 'Isolation préventive suite à anomalie critique') => {
+  isolateDevice: async (equipementId: number, deviceName: string, motif = 'Isolement préventif suite à anomalie critique') => {
     const response = await apiClient.post('/securite/isolate-device', {
       equipement_id: equipementId,
-      reason,
+      device_name: deviceName,
+      motif,
     });
     return response.data;
   },
@@ -372,6 +387,34 @@ export const assistantService = {
 };
 
 // Services Administration, RBAC & Continuité d'Activité (PRA)
+// Gestion du second facteur (TOTP) de l'utilisateur connecté
+export const MFA_REQUIRED_DETAIL = 'MFA_REQUIRED';
+
+export const isMfaRequiredError = (err: unknown): boolean =>
+  axios.isAxiosError(err) &&
+  err.response?.status === 401 &&
+  err.response?.data?.detail === MFA_REQUIRED_DETAIL;
+
+export const mfaService = {
+  setup: async (): Promise<MfaSetupResponse> => {
+    const response = await apiClient.post<MfaSetupResponse>('/auth/mfa/setup');
+    return response.data;
+  },
+  enable: async (code: string): Promise<{ mfa_active: boolean; recovery_codes: string[] }> => {
+    const response = await apiClient.post('/auth/mfa/enable', { code });
+    return response.data;
+  },
+  disable: async (mot_de_passe: string, code: string): Promise<{ mfa_active: boolean }> => {
+    const response = await apiClient.post('/auth/mfa/disable', { mot_de_passe, code });
+    return response.data;
+  },
+  me: async (): Promise<{ email: string; mfa_active: boolean }> => {
+    const response = await apiClient.get('/auth/me');
+    return response.data;
+  },
+};
+
+// Services d'administration (comptes, audit, PRA, notifications)
 export const adminService = {
   getUsers: async () => {
     const response = await apiClient.get('/admin/users');
@@ -385,6 +428,22 @@ export const adminService = {
     role: string;
   }) => {
     const response = await apiClient.post('/admin/users', userData);
+    return response.data;
+  },
+  updateUserRole: async (userId: number, role: 'Administrateur' | 'Technicien' | 'Visiteur') => {
+    const response = await apiClient.put(`/admin/users/${userId}/role`, { role });
+    return response.data;
+  },
+  resetUserPassword: async (userId: number, nouveau_mot_de_passe: string) => {
+    const response = await apiClient.post(`/admin/users/${userId}/password`, { nouveau_mot_de_passe });
+    return response.data;
+  },
+  generateResetCode: async (userId: number): Promise<ResetCodeResponse> => {
+    const response = await apiClient.post<ResetCodeResponse>(`/admin/users/${userId}/reset-code`);
+    return response.data;
+  },
+  resetUserMfa: async (userId: number) => {
+    const response = await apiClient.post(`/admin/users/${userId}/mfa/reset`);
     return response.data;
   },
   toggleUserStatus: async (userId: number) => {
@@ -437,7 +496,6 @@ export const adminService = {
     return response.data;
   },
   saveNotificationConfig: async (payload: {
-    demo_mode: boolean;
     telegram_enabled: boolean;
     telegram_token: string;
     telegram_chat_id: string;
@@ -472,10 +530,6 @@ export const adminService = {
     email_config?: { smtp_server: string; smtp_port: number; recipient: string };
   }) => {
     const response = await apiClient.post('/admin/notifications/dispatch', payload);
-    return response.data;
-  },
-  switchToRealNetworkOnly: async () => {
-    const response = await apiClient.post('/admin/environment/real-only');
     return response.data;
   },
 };

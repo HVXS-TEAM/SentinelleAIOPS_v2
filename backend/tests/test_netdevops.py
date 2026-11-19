@@ -87,7 +87,7 @@ def test_backup_and_diff_generation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_audit_async_service():
+async def test_run_audit_async_service(faux_cisco):
     """Vérifie l'exécution du service complet asynchrone avec fallback LLM."""
     report = await run_audit("SW-CORE-01")
     assert report["device_id"] == "SW-CORE-01"
@@ -100,17 +100,17 @@ async def test_run_audit_async_service():
         await run_audit("INCONNU-DEVICE-999")
 
 
-def test_api_netdevops_endpoints():
+def test_api_netdevops_endpoints(tech_headers, faux_cisco):
     """Vérifie les points de terminaison REST de l'API FastAPI."""
     # 1. Liste des équipements
-    resp_devices = client.get("/api/v1/netdevops/devices")
+    resp_devices = client.get("/api/v1/netdevops/devices", headers=tech_headers)
     assert resp_devices.status_code == 200
     devices = resp_devices.json()
-    assert len(devices) >= 4
+    assert len(devices) >= 3
     assert any(d["id"] == "SW-CORE-01" for d in devices)
 
     # 2. Lancement audit
-    resp_audit = client.post("/api/v1/netdevops/audit/SW-CORE-01")
+    resp_audit = client.post("/api/v1/netdevops/audit/SW-CORE-01", headers=tech_headers)
     assert resp_audit.status_code == 200
     data = resp_audit.json()
     assert data["device_id"] == "SW-CORE-01"
@@ -118,10 +118,10 @@ def test_api_netdevops_endpoints():
     assert "violations" in data
 
     # 3. Équipement inexistant
-    resp_bad = client.post("/api/v1/netdevops/audit/INEXISTANT-DEV")
+    resp_bad = client.post("/api/v1/netdevops/audit/INEXISTANT-DEV", headers=tech_headers)
     assert resp_bad.status_code == 404
 
     # 4. Historique de sauvegardes
-    resp_backups = client.get("/api/v1/netdevops/backups/SW-CORE-01")
+    resp_backups = client.get("/api/v1/netdevops/backups/SW-CORE-01", headers=tech_headers)
     assert resp_backups.status_code == 200
     assert isinstance(resp_backups.json(), list)

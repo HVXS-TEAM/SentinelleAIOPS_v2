@@ -14,6 +14,10 @@ from backend.app.core.config import settings
 from backend.app.core.audit import log_audit_action
 
 
+import logging
+logger = logging.getLogger("sentinelle.supervision.service")
+
+
 def calculate_mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     Rôle : Calcule le Mean Absolute Percentage Error (MAPE) entre les mesures réelles et la droite de régression.
@@ -388,48 +392,7 @@ class SupervisionService:
             deleted = db.query(Metrique).filter(Metrique.horodatage < cutoff).delete(synchronize_session=False)
             db.commit()
             return int(deleted or 0)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Purge des anciennes métriques en échec")
             db.rollback()
             return 0
-
-    @staticmethod
-    def simulate_disk_stress(
-        db: Session,
-        equipement_id: int,
-        target_disk_percent: float = 88.5,
-        slope_boost: float = 2.5,
-    ) -> Prediction:
-        """
-        Rôle : Injecte un test de charge disque accéléré sur un équipement pour éprouver le moteur d'alerte TTF.
-        Entrées : Session DB, ID équipement, pourcentage disque cible, accélération horaire.
-        Sorties : Instance Prediction recalculée.
-        Cas d'erreur : Lève ValueError si l'équipement cible n'existe pas.
-        """
-        equipement = db.query(Equipement).filter(Equipement.id == equipement_id).first()
-        if not equipement:
-            raise ValueError("Équipement introuvable")
-
-        now = datetime.now(timezone.utc)
-        # Purger les anciens points de stress disque pour construire une rampe monotone réaliste sans dents de scie
-        db.query(Metrique).filter(
-            Metrique.equipement_id == equipement_id,
-            Metrique.type_metrique == "disk_percent",
-        ).delete(synchronize_session=False)
-
-        points_count = 12
-        base_val = max(25.0, target_disk_percent - (slope_boost * (points_count - 1)))
-        for i in range(points_count):
-            t = now - timedelta(hours=(points_count - 1 - i))
-            val = round(base_val + (i * slope_boost), 1)
-            db.add(Metrique(equipement_id=equipement_id, type_metrique="disk_percent", valeur=val, horodatage=t))
-
-        db.commit()
-
-        pred = SupervisionService.calculate_ttf(db, equipement_id, metrique_cible="disk_percent")
-        log_audit_action(
-            db=db,
-            action="SIMULATION_DISK_STRESS",
-            cible=equipement.nom,
-            details=f"Test de charge disque à {target_disk_percent}%. Nouveau TTF estimé: {pred.ttf_estime_heures if pred else 'N/A'}h",
-        )
-        return pred

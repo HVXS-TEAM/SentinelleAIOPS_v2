@@ -27,129 +27,9 @@ export interface Equipment {
   memHistory: number[];
   anomalies: { title: string; desc: string; icon: 'bolt' | 'key' }[];
   lastBackup: string;
-  cisAudit: { status: 'ok' | 'fail'; message: string };
+  cisAudit: { status: 'ok' | 'fail' | 'unknown'; message: string };
 }
 
-/* ── Données conformes à la maquette Stitch ───────────────────────────────── */
-const INITIAL_EQUIPMENTS: Equipment[] = [
-  {
-    id: 'core-rtr-01',
-    name: 'CORE-RTR-01',
-    type: 'Router',
-    status: 'avertissement',
-    ip: '10.0.0.1',
-    mac: '00:1A:2B:3C:4D:5E',
-    os: 'Cisco IOS XE 17.3.2',
-    uptime: '342d 12h',
-    health: 90,
-    lastSeen: 'Il y a 2 min',
-    model: 'PA-3220', // ou Cisco ISR
-    serial: '0123456789X',
-    location: 'Datacenter Paris - Rack 01',
-    role: 'Routeur Cœur BGP / OSPF',
-    cpuLoad: 58,
-    memLoad: 64,
-    cpuHistory: [30, 35, 40, 42, 50, 52, 58, 60, 56, 58],
-    memHistory: [55, 58, 60, 60, 62, 62, 63, 64, 64, 64],
-    anomalies: [
-      {
-        title: 'BGP Route Flapping temporaire',
-        desc: 'Il y a 32 min - Détection de 3 battements de route sur PE-Orange',
-        icon: 'bolt',
-      },
-    ],
-    lastBackup: "Aujourd'hui, 02:00",
-    cisAudit: { status: 'ok', message: 'Conforme CIS Benchmark' },
-  },
-  {
-    id: 'fw-ext-02',
-    name: 'FW-EXT-02',
-    type: 'Firewall',
-    status: 'critique',
-    ip: '192.168.1.254',
-    mac: 'A1:B2:C3:D4:E5:F6',
-    os: 'Palo Alto PAN-OS 10.1',
-    uptime: '12d 4h',
-    health: 30,
-    lastSeen: 'Il y a 1 min',
-    model: 'PA-3220',
-    serial: '0123456789X',
-    location: 'Datacenter Paris - Rack 04',
-    role: 'Pare-feu Périmétrique',
-    cpuLoad: 94,
-    memLoad: 78,
-    cpuHistory: [30, 40, 35, 45, 50, 60, 75, 85, 98, 94],
-    memHistory: [60, 62, 65, 64, 68, 70, 72, 75, 79, 78],
-    anomalies: [
-      {
-        title: 'DDoS Suspecté (Port 443)',
-        desc: 'Il y a 15 min - Règle de blocage automatique échouée',
-        icon: 'bolt',
-      },
-      {
-        title: "Échecs d'authentification admin multiples",
-        desc: 'Il y a 4h - Source: 185.xxx.xxx.xxx',
-        icon: 'key',
-      },
-    ],
-    lastBackup: "Aujourd'hui, 02:00",
-    cisAudit: { status: 'fail', message: 'Échec (OS obsolète)' },
-  },
-  {
-    id: 'srv-db-01',
-    name: 'SRV-DB-01',
-    type: 'Serveur',
-    status: 'avertissement',
-    ip: '10.0.10.50',
-    mac: '11:22:33:44:55:66',
-    os: 'Ubuntu 22.04 LTS',
-    uptime: '45d 8h',
-    health: 65,
-    lastSeen: 'Il y a 5 min',
-    model: 'Dell PowerEdge R740',
-    serial: '1234567890Y',
-    location: 'Datacenter Paris - Rack 02',
-    role: 'Serveur Base de Données',
-    cpuLoad: 72,
-    memLoad: 88,
-    cpuHistory: [40, 45, 48, 55, 60, 62, 68, 70, 75, 72],
-    memHistory: [70, 72, 75, 78, 80, 82, 85, 86, 88, 88],
-    anomalies: [
-      {
-        title: 'IOPS saturation sur volume NVMe',
-        desc: 'Il y a 1h - Lock table prolongé sur partition pg_wal',
-        icon: 'bolt',
-      },
-    ],
-    lastBackup: 'Hier, 02:00',
-    cisAudit: { status: 'ok', message: 'Conforme Ubuntu Linux Benchmark' },
-  },
-  {
-    id: 'dist-sw-a',
-    name: 'DIST-SW-A',
-    type: 'Switch',
-    status: 'sain',
-    ip: '10.0.5.1',
-    mac: 'AA:BB:CC:DD:EE:FF',
-    os: 'ArubaOS-CX 10.08',
-    uptime: '120d 2h',
-    health: 98,
-    lastSeen: 'Il y a 1 min',
-    model: 'Aruba 6300M 48G',
-    serial: '2345678901Z',
-    location: 'Datacenter Paris - Rack 03',
-    role: 'Switch Distribution Cœur',
-    cpuLoad: 24,
-    memLoad: 35,
-    cpuHistory: [20, 22, 21, 25, 24, 23, 26, 25, 24, 24],
-    memHistory: [32, 33, 34, 34, 35, 35, 35, 36, 35, 35],
-    anomalies: [],
-    lastBackup: "Aujourd'hui, 02:00",
-    cisAudit: { status: 'ok', message: 'Conforme Aruba CIS Level 1' },
-  },
-];
-
-/* ── Coordonnées de la Topologie SVG (Maquette Stitch) ─────────────────────── */
 interface TopoNode {
   id: string;
   name: string;
@@ -160,17 +40,9 @@ interface TopoNode {
   isPulse?: boolean;
 }
 
-const TOPO_NODES: TopoNode[] = [
-  { id: 'core-rtr-01', name: 'CORE-RTR-01', cx: 350, cy: 60,  r: 16, status: 'avertissement' },
-  { id: 'dist-sw-a',   name: 'DIST-SW-A',   cx: 210, cy: 155, r: 12, status: 'sain' },
-  { id: 'srv-web-01',  name: 'SRV-WEB-01',  cx: 160, cy: 245, r: 8,  status: 'sain' },
-  { id: 'srv-db-01',   name: 'SRV-DB-01',   cx: 260, cy: 245, r: 8,  status: 'sain' },
-  { id: 'fw-ext-02',   name: 'FW-EXT-02',   cx: 460, cy: 245, r: 9,  status: 'critique', isPulse: true },
-];
-
 export const ParcPage: React.FC = () => {
-  const [equipments, setEquipments] = useState<Equipment[]>(INITIAL_EQUIPMENTS);
-  const [selectedEq, setSelectedEq] = useState<Equipment | null>(INITIAL_EQUIPMENTS[1]); // FW-EXT-02 ouvert par défaut comme dans screen.png
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [selectedEq, setSelectedEq] = useState<Equipment | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'sain' | 'avertissement' | 'critique'>('all');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -192,7 +64,7 @@ export const ParcPage: React.FC = () => {
     setIsLoading(true);
     try {
       const data = await parcService.getEquipements();
-      if (data && data.length > 0) {
+      {
         const mapped: Equipment[] = data.map(eq => {
           const lower = eq.type.toLowerCase();
           const eqType: 'Router' | 'Switch' | 'Firewall' | 'Serveur' =
@@ -244,7 +116,7 @@ export const ParcPage: React.FC = () => {
             health: Math.round(eq.score_sante),
             lastSeen: lastSeenStr,
             model: eq.firmware || eq.type,
-            serial: `SN-${String(eq.id).padStart(6, '0')}`,
+            serial: 'Non renseigné',
             location: eq.groupe ? `${eq.groupe}` : 'Réseau Local',
             role: `${eq.type} (${eq.groupe || 'Production'})`,
             cpuLoad: realCpu,
@@ -275,19 +147,19 @@ export const ParcPage: React.FC = () => {
                 ? { status: 'ok', message: eq.cis_message || 'Conforme CIS Benchmark' }
                 : eq.cis_status === 'Non conforme'
                 ? { status: 'fail', message: eq.cis_message || 'Écarts CIS détectés' }
-                : { status: 'ok', message: eq.cis_message || 'Prêt pour audit CIS' },
+                : { status: 'unknown', message: 'Jamais auditée' },
           };
         });
 
         setEquipments(mapped);
         setSelectedEq(prev => {
-          if (!prev) return mapped[0];
-          const found = mapped.find(e => e.id === prev.id || e.name === prev.name);
-          return found || mapped[0];
+          if (!prev) return null;
+          return mapped.find(e => e.id === prev.id || e.name === prev.name) ?? null;
         });
       }
     } catch (err) {
-      console.warn("Échec du chargement du parc depuis l'API, utilisation du fallback local", err);
+      console.warn('Échec du chargement du parc depuis le serveur', err);
+      showToast('Impossible de charger le parc : le serveur ne répond pas.');
     } finally {
       setIsLoading(false);
     }
@@ -302,9 +174,9 @@ export const ParcPage: React.FC = () => {
     showToast('Export de l\'inventaire au format CSV...');
     try {
       await parcService.exportCsv();
-      showToast('Fichier inventaire_parc_sentinelle.csv téléchargé avec succès !');
+      showToast('Fichier inventaire_parc_sentinelle.csv téléchargé.');
     } catch {
-      showToast('Inventaire exporté avec succès.');
+      showToast('Échec de l\'export : le fichier CSV n\'a pas pu être généré.');
     } finally {
       setIsExporting(false);
     }
@@ -312,13 +184,25 @@ export const ParcPage: React.FC = () => {
 
   const handleScanSnmp = async () => {
     setIsScanning(true);
-    showToast('Scan SNMP du réseau 192.168.1.0/24 en cours...');
     try {
-      const res = await parcService.scanSnmp('192.168.1.0/24', false);
-      showToast(`Scan SNMP terminé : ${res?.equipements_trouves ?? 4} actifs vérifiés. 0 équipement non autorisé.`);
+      let plage = realNetInfo?.subnet;
+      if (!plage) {
+        const info = await parcService.getLocalNetworkInfo();
+        setRealNetInfo(info);
+        plage = info.subnet;
+      }
+      showToast(`Scan du réseau ${plage} en cours...`);
+      const res = await parcService.scanSnmp(plage);
+      const actifs = res?.equipements_actifs?.length ?? 0;
+      const inconnus = res?.nouveaux_detectes ?? 0;
+      showToast(
+        inconnus > 0
+          ? `Scan terminé sur ${plage} : ${actifs} hôte(s) actif(s), ${inconnus} absent(s) du parc (alerte levée).`
+          : `Scan terminé sur ${plage} : ${actifs} hôte(s) actif(s), tous répertoriés.`,
+      );
       await loadEquipements();
     } catch {
-      showToast('Scan SNMP terminé : Tous les actifs du réseau répondent nominalement.');
+      showToast('Scan impossible : le serveur n\'a pas pu balayer le réseau.');
     } finally {
       setIsScanning(false);
     }
@@ -336,7 +220,7 @@ export const ParcPage: React.FC = () => {
   /* Calcul dynamique de la topologie SVG à partir des vrais équipements du parc */
   const dynamicTopo = React.useMemo(() => {
     if (!equipments || equipments.length === 0) {
-      return { nodes: TOPO_NODES, links: [] as { x1: number; y1: number; x2: number; y2: number; dashed?: boolean }[] };
+      return { nodes: [] as TopoNode[], links: [] as { x1: number; y1: number; x2: number; y2: number; dashed?: boolean }[] };
     }
     const routers = equipments.filter(e => e.type === 'Router' || e.type === 'Firewall');
     const switches = equipments.filter(e => e.type === 'Switch');
@@ -412,16 +296,16 @@ export const ParcPage: React.FC = () => {
   const [sshHistory, setSshHistory] = useState<string[]>([
     '========================================================================',
     ' Sentinelle AIOps v2.4.1 — Terminal d\'Administration Réseau & Système',
-    ' Paramiko Real SSH Engine & Exhaustive Cisco IOS / Linux Emulation CLI',
+    ' Sessions SSH réelles (Paramiko) — sorties exactes des équipements',
     '========================================================================',
-    'Tapez \'help\' ou \'?\' pour afficher l\'ensemble des commandes réseau et système.',
+    'Saisissez une commande : elle est exécutée telle quelle sur l\'équipement sélectionné.',
     '',
   ]);
   const [sshInput, setSshInput] = useState('');
   const [sshHistoryCommands, setSshHistoryCommands] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [isSshExecuting, setIsSshExecuting] = useState(false);
-  const [sshMode, setSshMode] = useState<'REAL_SSH' | 'EMULATED_CLI' | 'IDLE'>('IDLE');
+  const [sshMode, setSshMode] = useState<string>('IDLE');
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
   /* Exportation de la session CLI en fichier .log horodaté pour traçabilité */
@@ -651,7 +535,7 @@ export const ParcPage: React.FC = () => {
         'ping 8.8.8.8', 'traceroute 8.8.8.8',
         'uname -a', 'uptime', 'df -h', 'free -m', 'top -b -n 1', 'ps aux',
         'ip a', 'ip route', 'cat /etc/os-release', 'journalctl -n 20', 'netstat -tuln',
-        'help', 'clear', 'exit'
+        'clear', 'exit'
       ];
       const current = sshInput.trim().toLowerCase();
       if (!current) return;
@@ -699,7 +583,7 @@ export const ParcPage: React.FC = () => {
       } else {
         setSshHistory(prev => [...prev, res.output, '']);
       }
-      setSshMode(res.mode as any);
+      setSshMode(String(res.mode));
     } catch (e: any) {
       setSshHistory(prev => [...prev, `[ERREUR SSH] ${e?.response?.data?.detail || e.message}`, '']);
     } finally {
@@ -948,7 +832,7 @@ export const ParcPage: React.FC = () => {
                         />
                       )}
 
-                      {/* Animation pulsante pour le nœud critique FW-EXT-02 */}
+                      {/* Animation pulsante pour un nœud critique */}
                       {node.isPulse && (
                         <circle
                           cx={node.cx}
@@ -1039,6 +923,17 @@ export const ParcPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#3e4945]/40 font-normal">
+                {filteredEquipments.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 px-3 text-center text-xs text-[#87938e]" data-testid="parc-empty-state">
+                      {isLoading
+                        ? 'Chargement du parc...'
+                        : equipments.length === 0
+                        ? 'Aucun équipement dans le parc. Lancez une découverte réseau ou ajoutez un équipement.'
+                        : 'Aucun équipement ne correspond au filtre.'}
+                    </td>
+                  </tr>
+                )}
                 {filteredEquipments.map(eq => {
                   const isSelected = selectedEq?.id === eq.id;
                   const isCritique = eq.status === 'critique';
@@ -1362,7 +1257,7 @@ export const ParcPage: React.FC = () => {
                 <span className="text-[#dfe4e0]">Audit de conformité</span>
                 <span
                   className={`flex items-center gap-1 text-[11px] font-mono ${
-                    selectedEq.cisAudit.status === 'ok' ? 'text-[#78d8ba]' : 'text-[#ffb4ab]'
+                    selectedEq.cisAudit.status === 'ok' ? 'text-[#78d8ba]' : selectedEq.cisAudit.status === 'fail' ? 'text-[#ffb4ab]' : 'text-[#bdc9c3]'
                   }`}
                 >
                   {selectedEq.cisAudit.status === 'ok' ? (
@@ -1442,16 +1337,16 @@ export const ParcPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 {/* Badge statut mode de connexion */}
                 <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 border ${
-                  sshMode === 'REAL_SSH'
+                  sshMode === 'REAL_SSH' || sshMode === 'REAL_HOST_PROBE'
                     ? 'bg-[#00382b] text-[#78d8ba] border-[#78d8ba]'
-                    : sshMode === 'EMULATED_CLI'
-                    ? 'bg-[#2b2100] text-[#ffdd80] border-[#ffdd80]/40'
+                    : sshMode.startsWith('SSH_')
+                    ? 'bg-[#2b0f0c] text-[#ffb4ab] border-[#ffb4ab]/40'
                     : 'bg-[#1c211e] text-[#bdc9c3] border-[#3e4945]'
                 }`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    sshMode === 'REAL_SSH' ? 'bg-[#78d8ba] animate-ping' : sshMode === 'EMULATED_CLI' ? 'bg-[#ffdd80]' : 'bg-[#bdc9c3]'
+                    sshMode === 'REAL_SSH' || sshMode === 'REAL_HOST_PROBE' ? 'bg-[#78d8ba] animate-ping' : sshMode.startsWith('SSH_') ? 'bg-[#ffb4ab]' : 'bg-[#bdc9c3]'
                   }`} />
-                  <span>{sshMode === 'REAL_SSH' ? 'Session SSH Paramiko Réelle' : sshMode === 'EMULATED_CLI' ? 'Moteur CLI Émulateur IOS & Linux' : 'Prêt (Auto-Détection)'}</span>
+                  <span>{sshMode === 'REAL_SSH' ? 'Session SSH réelle' : sshMode === 'REAL_HOST_PROBE' ? 'Diagnostic réel de l\'hôte local' : sshMode.startsWith('SSH_') ? 'Échec de connexion SSH' : 'En attente'}</span>
                 </span>
 
                 {/* 1. Bouton Vider la console (Clear) */}
@@ -1515,7 +1410,6 @@ export const ParcPage: React.FC = () => {
                 { label: 'free -m', cmd: 'free -m' },
                 { label: 'top', cmd: 'top -b -n 1' },
                 { label: 'ip a', cmd: 'ip a' },
-                { label: 'help', cmd: 'help' },
                 { label: 'clear', cmd: 'clear' },
               ].map(action => (
                 <button
@@ -1572,7 +1466,7 @@ export const ParcPage: React.FC = () => {
                 value={sshInput}
                 onChange={e => setSshInput(e.target.value)}
                 onKeyDown={handleSshKeyDown}
-                placeholder="Tapez une commande (ex: show run, sh ip int br, df -h, ping 8.8.8.8, help)... [↑/↓ historique, Tab complétion]"
+                placeholder="Tapez une commande (ex: show run, sh ip int br, df -h, ping 8.8.8.8)... [↑/↓ historique, Tab complétion]"
                 className="flex-1 bg-transparent font-mono text-xs text-[#dfe4e0] focus:outline-none placeholder:text-[#bdc9c3]/40"
               />
               <div className="text-[10px] text-[#87938e] font-mono hidden md:block">
@@ -1636,12 +1530,12 @@ export const ParcPage: React.FC = () => {
                 <div className="h-6 w-px bg-[#3e4945]" />
                 <div className="flex flex-col">
                   <span className="text-[10px] uppercase font-bold text-[#87938e]">IP Locale Hôte</span>
-                  <span className="font-mono text-[#78d8ba]">{realNetInfo?.local_ip || '192.168.0.x'}</span>
+                  <span className="font-mono text-[#78d8ba]">{realNetInfo?.local_ip || '—'}</span>
                 </div>
                 <div className="h-6 w-px bg-[#3e4945]" />
                 <div className="flex flex-col">
                   <span className="text-[10px] uppercase font-bold text-[#87938e]">Passerelle (Box)</span>
-                  <span className="font-mono text-[#81d0f8]">{realNetInfo?.gateway_ip || '192.168.0.1'}</span>
+                  <span className="font-mono text-[#81d0f8]">{realNetInfo?.gateway_ip || '—'}</span>
                 </div>
               </div>
 
@@ -1679,7 +1573,7 @@ export const ParcPage: React.FC = () => {
                     Balayage ping multithreadé et sondage des ports d'administration en cours...
                   </p>
                   <p className="text-[11px] text-[#87938e] font-mono">
-                    Découverte de la passerelle box (192.168.0.1) et lecture de la table ARP Windows.
+                    Découverte de la passerelle et lecture de la table ARP de l'hôte.
                   </p>
                 </div>
               ) : realScanResult ? (
@@ -1797,7 +1691,7 @@ export const ParcPage: React.FC = () => {
                   <Icon name="sensors" size={32} className="text-[#78d8ba]/60" />
                   <p>Cliquez sur "Lancer le Balayage Réel" pour sonder votre réseau physique.</p>
                   <p className="text-[11px] text-[#87938e]">
-                    La passerelle Box Internet ({realNetInfo?.gateway_ip || '192.168.0.1'}) et vos postes seront automatiquement identifiés.
+                    La passerelle Box Internet ({realNetInfo?.gateway_ip || 'non détectée'}) et vos postes seront automatiquement identifiés.
                   </p>
                 </div>
               )}

@@ -22,10 +22,15 @@ from sqlalchemy.orm import Session
 
 from backend.app.db.models import Equipement, Metrique, Alerte, AuditReseau, SauvegardeConfig, User
 from backend.app.core.audit import log_audit_action
+from backend.app.core.ssh_trust import new_ssh_client, log_connection_failure
 from backend.app.core.security import encrypt_secret, decrypt_secret
 from backend.app.modules.supervision.service import SupervisionService
 from backend.app.modules.supervision.hardware_collector import HardwareCollector
 from backend.app.modules.supervision.snmp_client import SnmpClient
+
+
+import logging
+logger = logging.getLogger("sentinelle.parc.service")
 
 
 def _make_hidden_startupinfo():
@@ -251,8 +256,8 @@ class ParcService:
                         open_ports.append(port)
                         if best_latency_ms == 0.0 or rtt < best_latency_ms:
                             best_latency_ms = rtt
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("_check_reachability_and_latency : repli après erreur : %s", exc)
 
         if open_ports:
             return True, max(0.5, best_latency_ms), open_ports
@@ -278,8 +283,8 @@ class ParcService:
             if res.returncode == 0:
                 rtt = round((time.perf_counter() - t_start) * 1000.0, 2)
                 return True, max(1.0, rtt), open_ports
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("_check_reachability_and_latency : repli après erreur : %s", exc)
 
         return False, 0.0, open_ports
 
@@ -301,8 +306,7 @@ class ParcService:
             username, password = "admin", credentials_str
 
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh = new_ssh_client()
             ssh.connect(
                 hostname=ip,
                 port=22,
@@ -355,7 +359,8 @@ class ParcService:
                 "disk_percent": disk_pct,
                 "uptime_secondes": uptime_sec,
             }
-        except Exception:
+        except Exception as exc:
+            log_connection_failure(ip, exc)
             return None
 
     @classmethod
@@ -400,10 +405,11 @@ class ParcService:
                         decrypted = decrypt_secret(equipement.identifiants_chiffres)
                         if ":" not in decrypted:
                             community = decrypted.strip()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Déchiffrement des identifiants SNMP/SSH impossible : %s", exc)
                 snmp_metrics = SnmpClient.probe_device_metrics(equipement.ip, community=community, timeout=0.8)
-            except Exception:
+            except Exception as exc:
+                logger.debug("probe_equipment : repli après erreur : %s", exc)
                 snmp_metrics = None
 
             # 2. Si pas de SNMP, tenter la télémétrie SSH si port 22 ouvert et identifiants disponibles
@@ -411,7 +417,8 @@ class ParcService:
                 try:
                     plain_creds = decrypt_secret(equipement.identifiants_chiffres)
                     ssh_metrics = cls._collect_ssh_telemetry(equipement.ip, plain_creds)
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Déchiffrement des identifiants SSH impossible : %s", exc)
                     ssh_metrics = None
 
         if snmp_metrics:
@@ -502,6 +509,7 @@ class ParcService:
                 res = cls.probe_equipment(db, eq)
                 results.append(res)
             except Exception as exc:
+                logger.warning("Sonde d'un équipement en échec : %s", exc)
                 results.append({"equipement": eq.nom, "error": str(exc)})
 
         return {
@@ -548,81 +556,59 @@ class ParcService:
         return eq
 
     @staticmethod
-    def simulate_snmp_discovery(
-        db: Session,
-        ip_range: str = "192.168.1.0/24",
-        inject_rogue: bool = False,
-    ) -> Dict[str, Any]:
+    def discover_network(db: Session, ip_range: str = "192.168.1.0/24") -> Dict[str, Any]:
         """
-        Rôle : Exécute un balayage des équipements du parc (et optionnellement détecte un équipement non autorisé Rogue).
-        Entrées : Session DB, plage CIDR, booléen inject_rogue.
-        Sorties : Résumé du scan conforme à SnmpScanResponse.
+        Rôle : Découverte réseau réelle de la plage donnée (ping, ARP, ports, SNMP v2c) et rapprochement
+               avec le parc. Tout équipement actif absent du parc déclenche une alerte CRITICAL
+               « équipement non répertorié » (une seule alerte active par adresse IP).
+        Entrées : Session DB, plage CIDR (seuls les trois premiers octets servent de préfixe de balayage).
+        Sorties : Résumé conforme à SnmpScanResponse.
         """
         now = datetime.now(timezone.utc)
-        equipements = db.query(Equipement).all()
-        decouverts = []
+        scan = ParcService.scan_real_network(db, ip_prefix=ip_range)
+        actives = [d["ip"] for d in scan["devices"]]
+        inconnus = [d for d in scan["devices"] if not d["already_in_parc"]]
 
-        for eq in equipements:
-            if eq.statut_collecte != "Injoignable":
-                eq.derniere_collecte = now
-                decouverts.append(eq.nom)
+        for eq in db.query(Equipement).filter(Equipement.ip.in_(actives)).all():
+            eq.derniere_collecte = now
 
-        rogue_info = None
-        if inject_rogue:
-            rogue_nom = "ROGUE-PI-01"
-            rogue_ip = "192.168.1.150"
-            existing_rogue = db.query(Equipement).filter(Equipement.ip == rogue_ip).first()
-            if not existing_rogue:
-                rogue = Equipement(
-                    nom=rogue_nom,
-                    ip=rogue_ip,
-                    mac="B8:27:EB:AA:BB:CC",
-                    type="Poste client inconnu",
-                    os="Linux / Raspberry Pi OS",
-                    uptime_secondes=3600,
-                    score_sante=40.0,
-                    statut_collecte="OK",
-                    date_decouverte=now,
-                    derniere_collecte=now,
-                    groupe="Non catégorisé",
-                )
-                db.add(rogue)
-                db.commit()
-                db.refresh(rogue)
-
-                alerte_rogue = Alerte(
-                    equipement_id=rogue.id,
-                    module_origine="Parc",
-                    severite="CRITICAL",
-                    titre=f"Équipement non répertorié détecté : {rogue_nom}",
-                    message=f"Nouvelle adresse IP {rogue_ip} détectée sur le sous-réseau {ip_range} (MAC: B8:27:EB:AA:BB:CC). Suspicion d'appareil pirate (Rogue Device).",
-                    statut="Active",
-                    date_creation=now,
-                )
-                db.add(alerte_rogue)
-                log_audit_action(
-                    db=db,
-                    action="ROGUE_DEVICE_DETECTED",
-                    cible=f"{rogue_nom} ({rogue_ip})",
-                    details=f"Alerte intrusion : Découverte d'un équipement pirate sur {ip_range}",
-                )
-                db.commit()
-                rogue_info = {"nom": rogue_nom, "ip": rogue_ip, "alerte": "CRITICAL"}
-            else:
-                existing_rogue.derniere_collecte = now
-                rogue_info = {"nom": rogue_nom, "ip": rogue_ip, "alerte": "CRITICAL"}
-
+        for dev in inconnus:
+            titre = f"Équipement non répertorié détecté : {dev['ip']}"
+            deja = db.query(Alerte).filter(Alerte.titre == titre, Alerte.statut == "Active").first()
+            if deja:
+                continue
+            db.add(Alerte(
+                equipement_id=None,
+                module_origine="Parc",
+                severite="CRITICAL",
+                titre=titre,
+                message=(
+                    f"Adresse {dev['ip']} (MAC {dev.get('mac') or 'inconnue'}, nom {dev.get('hostname') or 'inconnu'}) "
+                    f"active sur {ip_range} mais absente du parc. Vérifiez qu'il s'agit d'un équipement autorisé."
+                ),
+                statut="Active",
+                date_creation=now,
+            ))
+            log_audit_action(
+                db=db,
+                action="UNKNOWN_DEVICE_DETECTED",
+                cible=dev["ip"],
+                details=f"Équipement non répertorié sur {ip_range} (MAC {dev.get('mac') or 'inconnue'})",
+            )
+        db.commit()
         log_audit_action(
             db=db,
-            action="SNMP_SCAN",
+            action="NETWORK_SCAN",
             cible=ip_range,
-            details=f"Balayage réseau terminé : {len(decouverts)} équipements actifs confirmés.",
+            details=f"Découverte réseau : {len(actives)} adresses actives, {len(inconnus)} non répertoriée(s).",
         )
+        premier = inconnus[0] if inconnus else None
         return {
             "plage": ip_range,
-            "equipements_actifs": decouverts,
-            "nouveaux_detectes": 1 if inject_rogue else 0,
-            "rogue_device": rogue_info,
+            "equipements_actifs": actives,
+            "nouveaux_detectes": len(inconnus),
+            "rogue_device": ({"nom": premier.get("hostname"), "ip": premier["ip"], "mac": premier.get("mac"), "alerte": "CRITICAL"} if premier else None),
+            "inconnus": inconnus,
             "horodatage": now.isoformat(),
         }
 
@@ -657,10 +643,12 @@ class ParcService:
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
             s.close()
-        except Exception:
+        except Exception as exc:
+            logger.debug("get_local_network_info : repli après erreur : %s", exc)
             try:
                 local_ip = socket.gethostbyname(hostname)
-            except Exception:
+            except Exception as exc:
+                logger.debug("get_local_network_info : repli après erreur : %s", exc)
                 local_ip = "127.0.0.1"
 
         if "." in local_ip and not local_ip.startswith("127."):
@@ -718,8 +706,8 @@ class ParcService:
                     startupinfo=_make_hidden_startupinfo(),
                     timeout=0.8,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("_quick_ping : repli après erreur : %s", exc)
 
         ips_to_ping = [f"{ip_prefix}.1", f"{ip_prefix}.254"]
         last_octet = int(local_ip.split(".")[-1]) if "." in local_ip and not local_ip.startswith("127.") else 100
@@ -750,12 +738,10 @@ class ParcService:
                     mac_found = match.group(2).replace("-", ":").upper()
                     if not ip_found.startswith("224.") and not ip_found.startswith("239.") and not ip_found.endswith(".255"):
                         arp_entries[ip_found] = mac_found
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("scan_real_network : repli après erreur : %s", exc)
 
         gateway_ip = net_info.get("gateway_ip", f"{ip_prefix}.1")
-        if gateway_ip not in arp_entries:
-            arp_entries[gateway_ip] = "00:00:5E:00:53:01"
         if local_ip not in arp_entries and not local_ip.startswith("127."):
             _, host_mac = HardwareCollector._detect_host_ip_and_mac()
             arp_entries[local_ip] = host_mac
@@ -777,8 +763,8 @@ class ParcService:
                     s.close()
                     if res == 0:
                         open_ports.append(port)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("scan_real_network : repli après erreur : %s", exc)
 
             # Sonde SNMP v2c native en UDP 161
             snmp_scan_data = None
@@ -786,7 +772,8 @@ class ParcService:
                 snmp_scan_data = SnmpClient.probe_device_metrics(dev_ip, community="public", timeout=0.25)
                 if snmp_scan_data:
                     open_ports.append(161)
-            except Exception:
+            except Exception as exc:
+                logger.debug("scan_real_network : repli après erreur : %s", exc)
                 snmp_scan_data = None
 
             banner = None
@@ -802,7 +789,8 @@ class ParcService:
                     resp = urllib.request.urlopen(req, timeout=0.7)
                     server_header = resp.headers.get("Server")
                     banner = f"HTTP {resp.status} ({server_header})" if server_header else f"HTTP {resp.status}"
-                except Exception:
+                except Exception as exc:
+                    logger.debug("scan_real_network : repli après erreur : %s", exc)
                     banner = "HTTP Port Actif"
 
             hostname = None
@@ -812,8 +800,8 @@ class ParcService:
                 try:
                     host_lookup = socket.gethostbyaddr(dev_ip)
                     hostname = host_lookup[0]
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("scan_real_network : repli après erreur : %s", exc)
 
             if dev_ip == local_ip:
                 dev_type = f"Serveur Host ({platform.system()})"
@@ -829,22 +817,20 @@ class ParcService:
                 else:
                     dev_type = "Périphérique Manageable (SNMP)"
             elif dev_ip == gateway_ip or dev_ip.endswith(".1") or dev_ip.endswith(".254"):
-                dev_type = "Routeur / Box Internet Physique"
-                dev_os = "Firmware Embarqué / Linux"
-                if not hostname:
-                    hostname = "BOX-ROUTER-GATEWAY"
+                dev_type = "Routeur / Passerelle (déduit de l'adresse)"
+                dev_os = "Non déterminé"
             elif 22 in open_ports and 445 not in open_ports:
-                dev_type = "Serveur / Switch Manageable"
-                dev_os = "Linux / Cisco IOS"
+                dev_type = "Équipement manageable SSH"
+                dev_os = "Non déterminé"
             elif 445 in open_ports or 135 in open_ports:
-                dev_type = "Poste client Windows"
-                dev_os = "Microsoft Windows"
+                dev_type = "Poste client Windows (déduit des ports)"
+                dev_os = "Non déterminé"
             elif 80 in open_ports or 443 in open_ports:
-                dev_type = "Périphérique Web / IoT"
-                dev_os = "Système Embarqué"
+                dev_type = "Périphérique Web"
+                dev_os = "Non déterminé"
             else:
                 dev_type = "Périphérique Réseau IP"
-                dev_os = "Linux / Périphérique Réseau"
+                dev_os = "Non déterminé"
 
             if not hostname:
                 hostname = f"HOST-{dev_ip.replace('.', '-')}"
@@ -901,11 +887,11 @@ class ParcService:
                 ip=ip,
                 mac=dev.get("mac"),
                 type=dev.get("type", "Périphérique Réseau"),
-                os=dev.get("os", "Linux"),
+                os=dev.get("os") or "Non déterminé",
                 groupe=dev.get("groupe", "Physique"),
-                uptime_secondes=86400,
+                uptime_secondes=0,
                 score_sante=100.0,
-                statut_collecte="OK",
+                statut_collecte="En attente",
                 date_decouverte=now,
                 derniere_collecte=now,
             )
@@ -916,8 +902,8 @@ class ParcService:
             # Sonder immédiatement l'équipement importé pour initialiser ses métriques et son TTF
             try:
                 cls.probe_equipment(db, new_eq)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Sonde initiale d'un équipement importé en échec : %s", exc)
 
             log_audit_action(
                 db=db,

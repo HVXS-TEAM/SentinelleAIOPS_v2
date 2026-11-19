@@ -28,6 +28,14 @@ def test_real_alert_lifecycle_and_probing():
     """Vérifie la liste des alertes, leur acquittement, leur résolution et le sondage d'équipement."""
     headers = _get_admin_headers()
 
+    # Alerte de test créée dans la base temporaire (l'application n'en fabrique aucune)
+    from backend.app.db.session import SessionLocal
+    from backend.app.db.models import Alerte
+    with SessionLocal() as db:
+        db.add(Alerte(module_origine="Supervision", severite="WARNING", titre="Alerte de test",
+                      message="Alerte créée par le test", statut="Active"))
+        db.commit()
+
     # 1. Lister les alertes
     resp_alerts = client.get("/api/v1/supervision/alerts?statut=Toutes", headers=headers)
     assert resp_alerts.status_code == 200
@@ -57,7 +65,7 @@ def test_real_parc_update_and_probe():
     items = resp_list.json()
     assert len(items) >= 1
 
-    target = items[0]
+    target = next(e for e in items if e["nom"] == "SW-CORE-01")
     assert "cpu_history" in target
     assert "ram_history" in target
     assert "cis_status" in target
@@ -65,7 +73,7 @@ def test_real_parc_update_and_probe():
     # Mise à jour de l'équipement avec identifiants SSH chiffrés
     resp_upd = client.put(
         f"/api/v1/parc/equipements/{target['id']}",
-        json={"groupe": "Cœur de réseau", "identifiants": "admin:secret123"},
+        json={"groupe": "Cœur de réseau", "mot_de_passe_secret": "admin:secret123"},
         headers=headers,
     )
     assert resp_upd.status_code == 200
@@ -78,14 +86,18 @@ def test_real_parc_update_and_probe():
     assert "latency_ms" in resp_probe.json()["probe"]
 
 
-def test_real_security_scan_and_firewall_actions():
+def test_real_security_scan_and_firewall_actions(monkeypatch):
     """Vérifie le scan de sécurité de l'hôte, le blocage d'IP et l'isolement d'équipement."""
     headers = _get_admin_headers()
 
     # 1. Scan sécurité réel
     resp_scan = client.post("/api/v1/securite/scan-real", headers=headers)
     assert resp_scan.status_code == 200
-    assert "total_logs" in resp_scan.json()
+    assert "sources" in resp_scan.json() and "modele" in resp_scan.json()
+
+    # Le pare-feu de l'hôte n'est pas modifié par les tests : on simule uniquement la réponse du système
+    from backend.app.modules.securite.service import SecurityService
+    monkeypatch.setattr(SecurityService, "_apply_firewall_block", staticmethod(lambda ip, rule: (True, "IPTABLES", "Règle créée.")))
 
     # 2. Blocage actif d'IP
     resp_block = client.post(
@@ -94,20 +106,22 @@ def test_real_security_scan_and_firewall_actions():
         headers=headers,
     )
     assert resp_block.status_code == 200
-    assert resp_block.json()["status"] in ("BLOCKED", "blocked")
+    assert resp_block.json()["status"] == "BLOCKED"
 
     # 3. Isolement d'équipement
     eqs = client.get("/api/v1/parc/equipements", headers=headers).json()
+    cible = next(e for e in eqs if e["nom"] == "SRV-DB-01")
     resp_iso = client.post(
         "/api/v1/securite/isolate-device",
-        json={"equipement_id": eqs[0]["id"], "device_name": eqs[0]["nom"], "motif": "Quarantaine préventive"},
+        json={"equipement_id": cible["id"], "device_name": cible["nom"], "motif": "Quarantaine préventive"},
         headers=headers,
     )
     assert resp_iso.status_code == 200
-    assert resp_iso.json()["status"] in ("ISOLATED", "isolated")
+    assert resp_iso.json()["status"] == "QUARANTINE_MARKED"
+    assert resp_iso.json()["network_action_performed"] is False
 
 
-def test_real_netdevops_remediation_and_restore():
+def test_real_netdevops_remediation_and_restore(faux_cisco):
     """Vérifie l'application réelle des correctifs CIS et la restauration de configuration."""
     headers = _get_admin_headers()
 
@@ -121,6 +135,8 @@ def test_real_netdevops_remediation_and_restore():
     rem_data = resp_rem.json()
     assert "audit" in rem_data
     assert rem_data["audit"]["score"] >= 0.0
+    assert rem_data["ssh_mode"] == "REAL_SSH_APPLIED"
+    assert faux_cisco.pushes == ["service password-encryption"]
 
     # 2. Restaurer la sauvegarde initiale
     resp_rest = client.post(
@@ -166,7 +182,9 @@ def test_real_admin_pra_restore_and_notification_persistence():
     assert resp_load.status_code == 200
     loaded = resp_load.json()
     assert loaded["telegram_enabled"] is True
-    assert loaded["telegram_token"] == "123456:ABCDEF"
+    # Le secret n'est jamais renvoyé en clair : seul son état est exposé
+    assert loaded["telegram_token"] == ""
+    assert loaded["telegram_token_set"] is True
     assert loaded["email_recipient"] == "soc@sentinelle.local"
 
 

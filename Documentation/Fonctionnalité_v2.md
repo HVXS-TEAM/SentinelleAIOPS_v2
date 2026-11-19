@@ -1,3 +1,5 @@
+> **Document historique** : feuille de route rédigée pendant la conception. Elle peut citer des fonctions prévues mais non réalisées ou une présentation orientée projet scolaire. L'état réel du produit est décrit dans [`DOSSIER_TECHNIQUE.md`](DOSSIER_TECHNIQUE.md).
+
 # Fonctionnalités v2 — Plateforme AIOps Sentinelle
 
 Plan de réalisation module par module : durée estimée, fonctions à garder, à ajouter ou à peaufiner, et ce qui est reporté. Durée totale : environ 2 à 3 mois (7 blocs de 1 à 2 semaines). Si le temps est limité à un mois, couper les blocs 6 (partie reporting) et 7.

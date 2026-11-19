@@ -13,10 +13,15 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user
 from backend.app.db.session import get_db
 from backend.app.modules.assistant.service import AssistantService
 
-router = APIRouter(prefix="/assistant", tags=["Assistant IA"])
+router = APIRouter(
+    prefix="/assistant",
+    tags=["Assistant IA"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class ChatRequest(BaseModel):
@@ -43,7 +48,7 @@ async def chat_with_assistant(
     return await AssistantService.chat(request.message, db)
 
 
-@router.get("/suggested-prompts", response_model=list[str], summary="Questions suggérées pour la démo BTS")
+@router.get("/suggested-prompts", response_model=list[str], summary="Questions suggérées")
 def get_suggested_prompts() -> list[str]:
     """Retourne des requêtes types prêtes à l'emploi couvrant l'ensemble des modules."""
     return AssistantService.get_suggested_prompts()

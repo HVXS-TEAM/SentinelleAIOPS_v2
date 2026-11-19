@@ -25,6 +25,10 @@ from backend.app.db.models import Equipement, Metrique
 from backend.app.modules.supervision.service import SupervisionService
 
 
+import logging
+logger = logging.getLogger("sentinelle.supervision.hardware_collector")
+
+
 class HardwareCollector:
     """Sonde de métrologie et d'inventaire matériel du système hôte Windows/Linux."""
 
@@ -44,10 +48,12 @@ class HardwareCollector:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
-        except Exception:
+        except Exception as exc:
+            logger.debug("_detect_host_ip_and_mac : repli après erreur : %s", exc)
             try:
                 local_ip = socket.gethostbyname(socket.gethostname())
-            except Exception:
+            except Exception as exc:
+                logger.debug("_detect_host_ip_and_mac : repli après erreur : %s", exc)
                 local_ip = "127.0.0.1"
 
         mac_addr = "00:00:00:00:00:00"
@@ -75,15 +81,15 @@ class HardwareCollector:
                             break
                 if mac_addr != "00:00:00:00:00:00":
                     break
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("_detect_host_ip_and_mac : repli après erreur : %s", exc)
 
         if mac_addr == "00:00:00:00:00:00":
             try:
                 node_int = uuid.getnode()
                 mac_addr = ":".join(f"{(node_int >> ele) & 0xff:02X}" for ele in range(40, -1, -8))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("_detect_host_ip_and_mac : repli après erreur : %s", exc)
 
         return local_ip, mac_addr
 
@@ -97,12 +103,13 @@ class HardwareCollector:
         if psutil is not None:
             try:
                 return int(time.time() - psutil.boot_time())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("_get_boot_uptime_seconds : repli après erreur : %s", exc)
         try:
             with open("/proc/uptime", "r", encoding="utf-8") as f:
                 return int(float(f.read().split()[0]))
-        except Exception:
+        except Exception as exc:
+            logger.debug("_get_boot_uptime_seconds : repli après erreur : %s", exc)
             return 86400
 
     @classmethod
@@ -141,7 +148,8 @@ class HardwareCollector:
                 db.add(equipement)
                 db.commit()
                 db.refresh(equipement)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Création de l'équipement hôte : rollback : %s", exc)
                 db.rollback()
                 equipement = db.query(Equipement).filter(Equipement.nom == hostname).first()
         else:
@@ -158,7 +166,8 @@ class HardwareCollector:
             if updated:
                 try:
                     db.commit()
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Validation de l'équipement hôte : rollback : %s", exc)
                     db.rollback()
 
         return equipement
@@ -189,7 +198,8 @@ class HardwareCollector:
 
             cls._last_net_sample = (now_ts, bytes_sent, bytes_recv)
             return mbps, net_sent_mb, net_recv_mb
-        except Exception:
+        except Exception as exc:
+            logger.debug("_measure_network_throughput_mbps : repli après erreur : %s", exc)
             return 0.0, 0.0, 0.0
 
     @classmethod
@@ -213,7 +223,8 @@ class HardwareCollector:
             try:
                 load1 = os.getloadavg()[0]
                 cpu_pct = round(min(100.0, max(1.0, (load1 / cpu_count) * 100.0)), 1)
-            except Exception:
+            except Exception as exc:
+                logger.debug("collect_live_metrics : repli après erreur : %s", exc)
                 cpu_pct = 15.0
 
         # 2. RAM
@@ -234,8 +245,8 @@ class HardwareCollector:
                     ram_pct = round((used_kb / m_tot) * 100.0, 1)
                     ram_total_gb = round(m_tot / (1024 ** 2), 2)
                     ram_used_gb = round(used_kb / (1024 ** 2), 2)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("collect_live_metrics : repli après erreur : %s", exc)
 
         # 3. Disque (Partition système principale C:\ sous Windows ou / sous Linux)
         mount_path = "C:\\" if platform.system() == "Windows" else "/"
@@ -250,7 +261,8 @@ class HardwareCollector:
                 disk_pct = round((du.used / du.total) * 100.0, 1) if du.total > 0 else 50.0
                 disk_total_gb = round(du.total / (1024 ** 3), 2)
                 disk_used_gb = round(du.used / (1024 ** 3), 2)
-        except Exception:
+        except Exception as exc:
+            logger.debug("collect_live_metrics : repli après erreur : %s", exc)
             disk_pct = 50.0
             disk_total_gb = 256.0
             disk_used_gb = 128.0

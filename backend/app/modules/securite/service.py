@@ -1,15 +1,21 @@
-"""Service de cybersécurité, sonde d'intrusion Windows/Linux et détection d'anomalies (Isolation Forest).
+"""Service de cybersécurité : détection d'intrusion sur journaux d'authentification RÉELS.
 
-Implémente :
-- L'analyse de logs SSH, Syslog et Windows Security EventLog (ID 4625 / 4624) par Isolation Forest
-- L'inspection temps réel des connexions réseau actives de l'hôte via psutil.net_connections()
-- Le blocage actif d'IP malveillantes via le Pare-feu Windows (netsh advfirewall) et la traçabilité d'audit
-- La corrélation multi-modules et l'anonymisation RGPD
+Chaîne de traitement :
+1. Collecte (collectors.py) : journal de l'hôte (auth.log, journald, EventLog Windows) et syslog des
+   équipements réseau (syslog_receiver.py). Les événements sont enregistrés dans `journal_authentifications`.
+2. Agrégation par adresse IP source sur une fenêtre glissante.
+3. Détection : règles statiques (force brute, password spraying) TOUJOURS actives ; Isolation Forest
+   entraîné sur l'historique réel (IP x fenêtre) dès que `SECURITY_MIN_BASELINE_SAMPLES` observations
+   sont disponibles. Le rapport indique le modèle réellement utilisé.
+4. Réponse : alertes dédupliquées, blocage pare-feu réellement appliqué (sinon refus explicite).
 """
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Any, Optional, Tuple
+import hashlib
+import ipaddress
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import numpy as np
@@ -20,8 +26,28 @@ except ImportError:
 from sklearn.ensemble import IsolationForest
 from sqlalchemy.orm import Session
 
-from backend.app.db.models import EvenementSecurite, Alerte, Equipement, Metrique, User
+from backend.app.core.config import settings
+from backend.app.db.models import (
+    EvenementSecurite, Alerte, Equipement, JournalAuthentification, User,
+)
 from backend.app.core.audit import log_audit_action
+from backend.app.modules.securite import collectors
+
+
+import logging
+logger = logging.getLogger("sentinelle.securite.service")
+
+# Règles statiques (toujours actives)
+BRUTE_FORCE_MIN_ECHECS = 5
+BRUTE_FORCE_MIN_RATIO = 0.8
+SPRAYING_MIN_COMPTES = 3
+SPRAYING_MIN_ECHECS = 3
+SEUIL_CRITIQUE_ECHECS = 20
+
+
+def _maintenant() -> datetime:
+    """UTC naïf : format des horodatages stockés en base."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def anonymize_ip_rgpd(ip_address: str) -> str:
@@ -53,345 +79,324 @@ class SecurityService:
     @staticmethod
     def parse_log_line(log_line: str) -> Optional[Dict[str, Any]]:
         """
-        Rôle : Parse une ligne de journal auth.log SSH Linux ou un événement d'authentification Windows (4625/4624).
-        Entrées : Ligne de log brute (log_line).
-        Sorties : Dictionnaire structuré {user, ip, type, is_failed, is_invalid_user} ou None.
+        Rôle : Analyse une ligne d'authentification sshd ou Cisco IOS (%SEC_LOGIN).
+        Entrées : Ligne de log brute.
+        Sorties : {user, ip, type, is_failed, is_invalid_user} ou None.
         """
-        failed_pattern = re.compile(
-            r"Failed password for (?:invalid user )?([\w\-\.]+) from ([\d\.]+) port \d+ ssh2"
-        )
-        accepted_pattern = re.compile(
-            r"Accepted password for ([\w\-\.]+) from ([\d\.]+) port \d+ ssh2"
-        )
-        win_fail_pattern = re.compile(
-            r"EventID=4625.*Account=([\w\-\.]+).*SourceIP=([\d\.]+)", re.IGNORECASE
-        )
-        win_ok_pattern = re.compile(
-            r"EventID=4624.*Account=([\w\-\.]+).*SourceIP=([\d\.]+)", re.IGNORECASE
-        )
-
-        match_failed = failed_pattern.search(log_line)
-        if match_failed:
-            return {
-                "user": match_failed.group(1),
-                "ip": match_failed.group(2),
-                "type": "auth_failed",
-                "is_failed": 1,
-                "is_invalid_user": 1 if "invalid user" in log_line else 0,
-            }
-
-        match_accepted = accepted_pattern.search(log_line)
-        if match_accepted:
-            return {
-                "user": match_accepted.group(1),
-                "ip": match_accepted.group(2),
-                "type": "auth_success",
-                "is_failed": 0,
-                "is_invalid_user": 0,
-            }
-
-        match_win_fail = win_fail_pattern.search(log_line)
-        if match_win_fail:
-            return {
-                "user": match_win_fail.group(1),
-                "ip": match_win_fail.group(2),
-                "type": "win_logon_failed",
-                "is_failed": 1,
-                "is_invalid_user": 1 if match_win_fail.group(1).lower() in ("admin", "guest", "test", "administrator") else 0,
-            }
-
-        match_win_ok = win_ok_pattern.search(log_line)
-        if match_win_ok:
-            return {
-                "user": match_win_ok.group(1),
-                "ip": match_win_ok.group(2),
-                "type": "win_logon_success",
-                "is_failed": 0,
-                "is_invalid_user": 0,
-            }
-
-        return None
+        ev = collectors.parse_auth_line(log_line)
+        if not ev:
+            return None
+        return {
+            "user": ev["user"],
+            "ip": ev["ip"],
+            "type": "auth_success" if ev["succes"] else "auth_failed",
+            "is_failed": 0 if ev["succes"] else 1,
+            "is_invalid_user": 1 if ev["invalide"] else 0,
+        }
 
     @staticmethod
     def extract_features(events: List[Dict[str, Any]]) -> np.ndarray:
         """
-        Rôle : Construit la matrice de caractéristiques (Features) pour l'Isolation Forest :
-               [0] Nombre de requêtes dans la fenêtre
-               [1] Taux d'échec (ratio failed / total)
-               [2] Présence d'utilisateurs inexistants (0 ou 1)
-               [3] Vitesse de rafale (tentatives/min)
-        Entrées : Liste d'événements agrégés par IP.
-        Sorties : Matrice numpy 2D.
+        Rôle : Matrice de caractéristiques de l'Isolation Forest, une ligne par (IP, fenêtre) :
+               [0] nombre d'événements, [1] taux d'échec, [2] compte inexistant ciblé (0/1),
+               [3] échecs par minute.
         """
-        features = []
-        for ev in events:
-            f0 = float(ev.get("count", 1))
-            f1 = float(ev.get("fail_ratio", 1.0))
-            f2 = float(ev.get("invalid_user_flag", 0.0))
-            f3 = float(ev.get("attempts_per_min", 1.0))
-            features.append([f0, f1, f2, f3])
-        return np.array(features)
+        return np.array([
+            [float(e["count"]), float(e["fail_ratio"]), float(e["invalid_user_flag"]), float(e["attempts_per_min"])]
+            for e in events
+        ])
+
+    # ── Journal d'authentification ───────────────────────────────────────────
 
     @staticmethod
-    def collect_real_host_security_logs() -> Dict[str, Any]:
-        """
-        Rôle : Collecte les vrais événements de sécurité et connexions réseau actives sur la machine hôte
-               (Windows EventLog wevtutil 4625/4624, Linux /var/log/auth.log et sockets psutil).
-        Entrées : Aucune.
-        Sorties : Dictionnaire contenant les lignes de logs synthétisées et les statistiques de sockets.
-        """
-        collected_logs: List[str] = []
-        active_connections_count = 0
-        listening_ports_count = 0
-        remote_ip_counts: Dict[str, int] = {}
+    def ingest_events(db: Session, events: List[Dict[str, Any]], equipement_id: Optional[int] = None) -> int:
+        """Enregistre les événements non encore vus (dédoublonnage par empreinte). Renvoie le nombre ajouté."""
+        if not events:
+            return 0
+        compteur: Dict[str, int] = {}
+        lignes: Dict[str, Dict[str, Any]] = {}
+        for ev in events:
+            base = f"{ev['horodatage'].isoformat()}|{ev['ip']}|{ev.get('user')}|{int(ev['succes'])}|{ev['origine']}"
+            n = compteur.get(base, 0)
+            compteur[base] = n + 1
+            lignes[hashlib.sha256(f"{base}|{n}".encode()).hexdigest()] = ev
+        existantes = set()
+        cles = list(lignes)
+        for i in range(0, len(cles), 500):
+            lot = cles[i:i + 500]
+            existantes.update(
+                r[0] for r in db.query(JournalAuthentification.empreinte)
+                .filter(JournalAuthentification.empreinte.in_(lot)).all()
+            )
+        ajoutes = 0
+        for emp, ev in lignes.items():
+            if emp in existantes:
+                continue
+            db.add(JournalAuthentification(
+                empreinte=emp, horodatage=ev["horodatage"], source_ip=ev["ip"],
+                utilisateur=(ev.get("user") or None) and str(ev["user"])[:80],
+                succes=bool(ev["succes"]), utilisateur_invalide=bool(ev.get("invalide")),
+                origine=ev["origine"], equipement_id=ev.get("equipement_id", equipement_id),
+            ))
+            ajoutes += 1
+        db.commit()
+        return ajoutes
 
-        # 1. Inspection réelle des connexions réseau via psutil
-        try:
-            conns = psutil.net_connections(kind="inet")
-            for c in conns:
-                if c.status == "LISTEN":
-                    listening_ports_count += 1
-                elif c.raddr and c.raddr.ip:
-                    active_connections_count += 1
-                    rip = c.raddr.ip
-                    if not rip.startswith("127.") and rip != "::1":
-                        remote_ip_counts[rip] = remote_ip_counts.get(rip, 0) + 1
-        except Exception:
-            pass
+    @staticmethod
+    def _agreger(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Agrège des événements {ip, user, succes, invalide, horodatage} par IP source."""
+        par_ip: Dict[str, Dict[str, Any]] = {}
+        for ev in events:
+            s = par_ip.setdefault(ev["ip"], {
+                "ip": ev["ip"], "count": 0, "fails": 0, "invalid": 0, "users": set(),
+                "first": ev["horodatage"], "last": ev["horodatage"], "equipements": {},
+            })
+            s["count"] += 1
+            s["fails"] += 0 if ev["succes"] else 1
+            s["invalid"] += 1 if ev.get("invalide") else 0
+            if ev.get("user"):
+                s["users"].add(ev["user"])
+            s["first"] = min(s["first"], ev["horodatage"])
+            s["last"] = max(s["last"], ev["horodatage"])
+            if ev.get("equipement_id"):
+                s["equipements"][ev["equipement_id"]] = s["equipements"].get(ev["equipement_id"], 0) + 1
+        resultat = []
+        for s in par_ip.values():
+            minutes = max(1.0, (s["last"] - s["first"]).total_seconds() / 60.0)
+            resultat.append({
+                "ip": s["ip"], "count": s["count"], "fails": s["fails"],
+                "fail_ratio": s["fails"] / s["count"],
+                "invalid_user_flag": 1.0 if s["invalid"] else 0.0,
+                "attempts_per_min": s["fails"] / minutes,
+                "target_users": sorted(s["users"]),
+                "equipement_id": max(s["equipements"], key=s["equipements"].get) if s["equipements"] else None,
+            })
+        return resultat
 
-        # 2. Lecture des événements Windows Security (EventID 4625 / 4624) si exécuté sous Windows
-        if platform.system() == "Windows":
-            no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-            try:
-                raw_ev = subprocess.check_output(
-                    [
-                        "wevtutil",
-                        "qe",
-                        "Security",
-                        "/q:*[System[(EventID=4625 or EventID=4624)]]",
-                        "/c:20",
-                        "/rd:true",
-                        "/f:text",
-                    ],
-                    stderr=subprocess.DEVNULL,
-                    stdin=subprocess.DEVNULL,
-                    creationflags=no_win,
-                    startupinfo=_hidden_startupinfo(),
-                    timeout=2.5,
-                ).decode("cp850", errors="ignore")
-                blocks = raw_ev.split("Event[")
-                for b in blocks[1:]:
-                    ev_id = "4625" if "4625" in b else "4624"
-                    ip_m = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", b)
-                    src_ip = ip_m.group(1) if ip_m else "127.0.0.1"
-                    collected_logs.append(f"EventID={ev_id} Account=winuser SourceIP={src_ip}")
-            except Exception:
-                pass
-        else:
-            # Lecture non-bloquante de /var/log/auth.log sous Linux si lisible
-            try:
-                with open("/var/log/auth.log", "r", encoding="utf-8", errors="ignore") as f:
-                    tail_lines = f.readlines()[-40:]
-                    for l in tail_lines:
-                        if "Failed password" in l or "Accepted password" in l:
-                            collected_logs.append(l.strip())
-            except Exception:
-                pass
+    @staticmethod
+    def _matrice_reference(db: Session, avant: datetime, fenetre_min: int) -> np.ndarray:
+        """Historique réel (IP x fenêtre) antérieur à la fenêtre courante : base d'apprentissage."""
+        rows = db.query(JournalAuthentification).filter(JournalAuthentification.horodatage < avant).all()
+        seaux: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+        for r in rows:
+            cle = (r.source_ip, int(r.horodatage.replace(tzinfo=timezone.utc).timestamp() // (fenetre_min * 60)))
+            seaux.setdefault(cle, []).append({
+                "ip": r.source_ip, "user": r.utilisateur, "succes": r.succes,
+                "invalide": r.utilisateur_invalide, "horodatage": r.horodatage,
+            })
+        lignes = []
+        for evs in seaux.values():
+            lignes.extend(SecurityService._agreger(evs))
+        return SecurityService.extract_features(lignes) if lignes else np.empty((0, 4))
 
-        # 3. Convertir les connexions réseau distantes actives en observations pour l'Isolation Forest
-        for rip, cnt in remote_ip_counts.items():
-            if cnt >= 12:
-                # Une IP distante avec une rafale élevée de connexions simultanées est signalée pour évaluation
-                for _ in range(min(cnt, 10)):
-                    collected_logs.append(f"Failed password for invalid user netscan from {rip} port 443 ssh2")
+    @staticmethod
+    def _detecter(agg: List[Dict[str, Any]], reference: np.ndarray) -> Tuple[str, List[Dict[str, Any]]]:
+        """Applique règles statiques + Isolation Forest (si historique suffisant). Renvoie (modèle, verdicts)."""
+        modele = "regles_statiques"
+        if_pred = [1] * len(agg)
+        if_score = [0.0] * len(agg)
+        if agg and len(reference) >= settings.SECURITY_MIN_BASELINE_SAMPLES:
+            forest = IsolationForest(n_estimators=200, contamination="auto", random_state=42).fit(reference)
+            X = SecurityService.extract_features(agg)
+            if_pred = list(forest.predict(X))
+            if_score = [float(round(-s, 3)) for s in forest.decision_function(X)]
+            modele = "isolation_forest+regles_statiques"
+        verdicts = []
+        for i, it in enumerate(agg):
+            brute = it["fails"] >= BRUTE_FORCE_MIN_ECHECS and it["fail_ratio"] >= BRUTE_FORCE_MIN_RATIO
+            spraying = len(it["target_users"]) >= SPRAYING_MIN_COMPTES and it["fails"] >= SPRAYING_MIN_ECHECS
+            ecart = if_pred[i] == -1 and it["fails"] > 0
+            verdicts.append({
+                "brute_force": brute, "spraying": spraying, "ecart_if": ecart,
+                "score": if_score[i] if modele != "regles_statiques" else 0.0,
+                "anomalie": brute or spraying or ecart,
+            })
+        return modele, verdicts
+
+    @staticmethod
+    def _rapport_item(it: Dict[str, Any], v: Dict[str, Any]) -> Dict[str, Any]:
+        type_ev = (
+            "brute_force" if v["brute_force"] else "password_spraying" if v["spraying"]
+            else "ecart_comportemental" if v["ecart_if"] else "echecs_authentification"
+        )
+        severite = "INFO"
+        if v["anomalie"]:
+            severite = "CRITICAL" if (it["fails"] >= SEUIL_CRITIQUE_ECHECS or v["spraying"]) else "WARNING"
+        elif it["fails"] > 0:
+            severite = "INFO"
+        methodes = [m for m, ok in (("règle force brute", v["brute_force"]), ("règle spraying", v["spraying"]),
+                                    ("Isolation Forest", v["ecart_if"])) if ok]
+        explication = (
+            f"{it['count']} événement(s) d'authentification dont {it['fails']} échec(s), "
+            f"{it['attempts_per_min']:.1f} échec/min, comptes visés : {', '.join(it['target_users']) or 'inconnu'}."
+            + (f" Détecté par : {', '.join(methodes)}." if methodes else "")
+        )
+        return {"type": type_ev, "severite": severite, "explication": explication}
+
+    @classmethod
+    def analyze_window(cls, db: Session, window_minutes: Optional[int] = None,
+                       maintenant: Optional[datetime] = None) -> Dict[str, Any]:
+        """Analyse le journal réel sur la fenêtre courante, enregistre les événements et alertes (dédupliqués)."""
+        fenetre = window_minutes or settings.SECURITY_WINDOW_MINUTES
+        maintenant = maintenant or _maintenant()
+        debut = maintenant - timedelta(minutes=fenetre)
+        rows = db.query(JournalAuthentification).filter(JournalAuthentification.horodatage >= debut).all()
+        evs = [{"ip": r.source_ip, "user": r.utilisateur, "succes": r.succes, "invalide": r.utilisateur_invalide,
+                "horodatage": r.horodatage, "equipement_id": r.equipement_id} for r in rows]
+        agg = cls._agreger(evs)
+        reference = cls._matrice_reference(db, debut, fenetre)
+        modele, verdicts = cls._detecter(agg, reference)
+
+        anomalies = []
+        for it, v in zip(agg, verdicts):
+            if it["fails"] == 0:
+                continue
+            info = cls._rapport_item(it, v)
+            ip_anon = anonymize_ip_rgpd(it["ip"])
+            existant = (
+                db.query(EvenementSecurite)
+                .filter(EvenementSecurite.source_ip == it["ip"], EvenementSecurite.horodatage >= debut)
+                .order_by(EvenementSecurite.horodatage.desc()).first()
+            )
+            champs = dict(
+                equipement_id=it["equipement_id"], utilisateur_cible=",".join(it["target_users"])[:50],
+                type_evenement=info["type"], score_anomalie=v["score"], severite=info["severite"],
+                is_anomaly=v["anomalie"], explication=info["explication"],
+                tentatives_minute=int(round(it["attempts_per_min"])),
+            )
+            if existant:
+                bloque = "[BLOQUÉ]" in (existant.explication or "")
+                for k, val in champs.items():
+                    setattr(existant, k, val)
+                if bloque:
+                    existant.explication = f"[BLOQUÉ] {existant.explication}"
             else:
-                collected_logs.append(f"Accepted password for host_session from {rip} port 443 ssh2")
-
-        # Ajouter la session locale active pour garantir au moins une observation normale
-        if not collected_logs:
-            collected_logs.append("Accepted password for admin from 127.0.0.1 port 8000 ssh2")
-
+                db.add(EvenementSecurite(source_ip=it["ip"], source_ip_anonymisee=ip_anon,
+                                         horodatage=maintenant, **champs))
+            if v["anomalie"]:
+                titre = f"Cyberattaque détectée : {info['type']} ({ip_anon})"
+                deja = db.query(Alerte).filter(Alerte.titre == titre, Alerte.statut == "Active").first()
+                if not deja:
+                    db.add(Alerte(equipement_id=it["equipement_id"], module_origine="Sécurité",
+                                  severite=info["severite"], titre=titre, message=info["explication"],
+                                  statut="Active", date_creation=datetime.now(timezone.utc)))
+                anomalies.append({"ip": ip_anon, "type": info["type"], "severite": info["severite"],
+                                  "score_ia": v["score"], "explication": info["explication"],
+                                  "detecte_par_regle": v["brute_force"] or v["spraying"],
+                                  "detecte_par_isolation_forest": v["ecart_if"]})
+        db.commit()
         return {
-            "logs": collected_logs,
-            "active_connections_count": active_connections_count,
-            "listening_ports_count": listening_ports_count,
-            "remote_ips_inspected": len(remote_ip_counts),
+            "fenetre_minutes": fenetre,
+            "evenements_analyses": len(rows),
+            "ip_evaluees": len(agg),
+            "modele": modele,
+            "echantillons_baseline": int(len(reference)),
+            "anomalies_detectees": len(anomalies),
+            "anomalies": anomalies,
         }
 
     @classmethod
-    def run_real_security_scan(cls, db: Session) -> Dict[str, Any]:
+    def run_real_security_scan(cls, db: Session, audit: bool = True) -> Dict[str, Any]:
         """
-        Rôle : Exécute un scan complet de sécurité sur l'hôte et les journaux collectés,
-               entraîne l'Isolation Forest et retourne le bilan consolidé.
-        Entrées : Session DB.
-        Sorties : Bilan complet de détection et statistiques de sockets.
+        Rôle : Lit les journaux d'authentification de l'hôte, les enregistre, puis analyse la fenêtre courante.
+        Sorties : Rapport (sources lues avec leur statut, modèle utilisé, anomalies) + statistiques de sockets.
         """
-        host_data = cls.collect_real_host_security_logs()
         host_eq = db.query(Equipement).filter(Equipement.nom == socket.gethostname()).first()
-        eq_id = host_eq.id if host_eq else None
+        evs, sources = collectors.collecter_hote()
+        nouveaux = cls.ingest_events(db, evs, equipement_id=host_eq.id if host_eq else None)
+        rapport = cls.analyze_window(db)
 
-        analysis = cls.train_and_detect_anomalies(db, host_data["logs"], equipement_id=eq_id)
-        log_audit_action(
-            db=db,
-            action="SECURITY_REAL_SCAN",
-            cible=socket.gethostname(),
-            details=(
-                f"Scan sécurité réel exécuté : {len(host_data['logs'])} événements inspectés, "
-                f"{host_data['active_connections_count']} connexions actives, "
-                f"{analysis.get('anomalies_detectees', 0)} anomalie(s)."
-            ),
-        )
+        actives = ecoute = 0
+        try:
+            for c in psutil.net_connections(kind="inet"):
+                if c.status == "LISTEN":
+                    ecoute += 1
+                elif c.raddr:
+                    actives += 1
+        except Exception as exc:
+            logger.debug("run_real_security_scan : sockets illisibles : %s", exc)
+
+        if audit or rapport["anomalies_detectees"]:
+            log_audit_action(
+                db=db, action="SECURITY_REAL_SCAN", cible=socket.gethostname(),
+                details=(f"{nouveaux} nouvel(s) événement(s) d'authentification, "
+                         f"{rapport['evenements_analyses']} analysé(s), {rapport['anomalies_detectees']} anomalie(s) "
+                         f"(modèle : {rapport['modele']})."),
+            )
         return {
-            **analysis,
-            "active_connections_count": host_data["active_connections_count"],
-            "listening_ports_count": host_data["listening_ports_count"],
-            "remote_ips_inspected": host_data["remote_ips_inspected"],
+            **rapport,
+            "sources": sources,
+            "nouveaux_evenements": nouveaux,
+            "aucune_source_lisible": not any(s["lisible"] for s in sources),
+            "active_connections_count": actives,
+            "listening_ports_count": ecoute,
+        }
+
+    @classmethod
+    def train_and_detect_anomalies(cls, db: Session, log_batch: List[str],
+                                   equipement_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Rôle : Analyse un lot de lignes fourni par l'opérateur. ANALYSE SEULE : rien n'est enregistré
+               (ni journal, ni événement, ni alerte), car ces lignes ne sont pas des observations de l'hôte.
+        """
+        now = _maintenant()
+        evs = []
+        for line in log_batch:
+            e = collectors.parse_auth_line(line, defaut=now)
+            if e:
+                evs.append({"ip": e["ip"], "user": e["user"], "succes": e["succes"],
+                            "invalide": e["invalide"], "horodatage": e["horodatage"]})
+        agg = cls._agreger(evs)
+        reference = cls._matrice_reference(db, now, settings.SECURITY_WINDOW_MINUTES)
+        modele, verdicts = cls._detecter(agg, reference)
+        anomalies = []
+        for it, v in zip(agg, verdicts):
+            if v["anomalie"]:
+                info = cls._rapport_item(it, v)
+                anomalies.append({"ip": anonymize_ip_rgpd(it["ip"]), "type": info["type"],
+                                  "severite": info["severite"], "score_ia": v["score"],
+                                  "explication": info["explication"]})
+        return {
+            "total_logs": len(log_batch),
+            "lignes_reconnues": len(evs),
+            "ip_evaluees": len(agg),
+            "modele": modele,
+            "echantillons_baseline": int(len(reference)),
+            "anomalies_detectees": len(anomalies),
+            "anomalies": anomalies,
+            "persiste": False,
         }
 
     @staticmethod
-    def train_and_detect_anomalies(
-        db: Session,
-        log_batch: List[str],
-        equipement_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """
-        Rôle : Analyse un lot de logs, applique l'Isolation Forest et compare avec une baseline statique.
-        Entrées : Session DB, liste de lignes de logs, ID d'équipement optionnel.
-        Sorties : Résultat structuré avec anomalies détectées et score d'accord baseline.
-        """
-        parsed_events = []
-        for line in log_batch:
-            parsed = SecurityService.parse_log_line(line)
-            if parsed:
-                parsed_events.append(parsed)
-
-        if not parsed_events:
-            return {
-                "total_logs": len(log_batch),
-                "anomalies_detectees": 0,
-                "taux_detection_pct": 0.0,
-                "comparaison_baseline": {},
-                "evenements": [],
-            }
-
-        ip_stats: Dict[str, Dict[str, Any]] = {}
-        for ev in parsed_events:
-            ip = ev["ip"]
-            if ip not in ip_stats:
-                ip_stats[ip] = {
-                    "ip": ip,
-                    "count": 0,
-                    "fails": 0,
-                    "invalid_users": 0,
-                    "target_users": set(),
-                }
-            ip_stats[ip]["count"] += 1
-            if ev["is_failed"]:
-                ip_stats[ip]["fails"] += 1
-            if ev["is_invalid_user"]:
-                ip_stats[ip]["invalid_users"] += 1
-            ip_stats[ip]["target_users"].add(ev["user"])
-
-        agg_list = []
-        for ip, stat in ip_stats.items():
-            fail_ratio = stat["fails"] / stat["count"]
-            attempts_per_min = stat["fails"] * 2.0
-            agg_list.append({
-                "ip": ip,
-                "count": stat["count"],
-                "fails": stat["fails"],
-                "fail_ratio": fail_ratio,
-                "invalid_user_flag": 1.0 if stat["invalid_users"] > 0 else 0.0,
-                "attempts_per_min": attempts_per_min,
-                "target_users": list(stat["target_users"]),
-            })
-
-        X = SecurityService.extract_features(agg_list)
-
-        # Modèle 1 : Isolation Forest
-        iso_forest = IsolationForest(contamination=0.25, random_state=42)
-        predictions = iso_forest.fit_predict(X)
-        scores = -iso_forest.decision_function(X)
-
-        # Modèle 2 : Baseline statique (> 3 échecs ET ratio échec > 0.8)
-        baseline_preds = [
-            -1 if (item["count"] >= 3 and item["fail_ratio"] >= 0.8) else 1
-            for item in agg_list
-        ]
-
-        # Si un seul groupe IP sans échec est soumis (ex: scan local nominal), éviter un faux positif forcé par contamination
-        if len(agg_list) == 1 and agg_list[0]["fails"] == 0:
-            predictions = [1]
-
-        now = datetime.now(timezone.utc)
-        detected_anomalies = []
-
-        for i, item in enumerate(agg_list):
-            is_anomaly = bool(predictions[i] == -1 and item["fails"] > 0)
-            score_anom = float(round(scores[i], 3))
-            ip = item["ip"]
-            ip_anon = anonymize_ip_rgpd(ip)
-
-            severite = "CRITICAL" if item["count"] >= 8 or item["invalid_user_flag"] else ("WARNING" if item["fails"] > 0 else "INFO")
-            type_ev = "brute_force_ssh" if item["count"] >= 5 else ("connexion_suspecte" if item["fails"] > 0 else "session_authentifiee")
-            explication = (
-                f"{item['count']} événements d'authentification ({item['fails']} échecs) "
-                f"sur comptes {', '.join(item['target_users'])}. Score IA: {score_anom}."
-            )
-
-            ev_model = EvenementSecurite(
-                equipement_id=equipement_id,
-                source_ip=ip,
-                source_ip_anonymisee=ip_anon,
-                utilisateur_cible=",".join(item["target_users"])[:50],
-                type_evenement=type_ev,
-                score_anomalie=score_anom,
-                severite=severite,
-                is_anomaly=is_anomaly,
-                explication=explication,
-                tentatives_minute=int(item["attempts_per_min"]),
-                horodatage=now,
-            )
-            db.add(ev_model)
-
-            if is_anomaly:
-                alerte = Alerte(
-                    equipement_id=equipement_id,
-                    module_origine="Sécurité",
-                    severite=severite,
-                    titre=f"Cyberattaque détectée : {type_ev} ({ip_anon})",
-                    message=explication,
-                    statut="Active",
-                    date_creation=now,
-                )
-                db.add(alerte)
-                detected_anomalies.append({
-                    "ip": ip_anon,
-                    "score_ia": score_anom,
-                    "severite": severite,
-                    "explication": explication,
-                    "detecte_par_baseline": baseline_preds[i] == -1,
-                })
-
-        db.commit()
-
-        total_eval = len(agg_list)
-        ai_detected_count = len(detected_anomalies)
-        baseline_detected_count = sum(1 for p in baseline_preds if p == -1)
-
-        return {
-            "total_logs": len(log_batch),
-            "ip_evaluees": total_eval,
-            "anomalies_detectees": ai_detected_count,
-            "comparaison_baseline": {
-                "isolation_forest_count": ai_detected_count,
-                "baseline_statique_count": baseline_detected_count,
-                "accord_pourcentage": round(
-                    sum(1 for a, b in zip(predictions, baseline_preds) if a == b) / total_eval * 100, 1
-                ),
-            },
-            "anomalies": detected_anomalies,
-        }
+    def _apply_firewall_block(clean_ip: str, rule_name: str) -> Tuple[bool, str, str]:
+        """Crée réellement la règle de blocage (netsh sous Windows, iptables sous Linux).
+        Renvoie (appliqué, mode, détail) ; jamais « appliqué » sans code retour 0."""
+        no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        try:
+            if platform.system() == "Windows":
+                cmd = ["netsh", "advfirewall", "firewall", "add", "rule", f"name={rule_name}",
+                       "dir=in", "action=block", f"remoteip={clean_ip}"]
+                res = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=5,
+                                     creationflags=no_win, startupinfo=_hidden_startupinfo())
+                mode = "WINDOWS_DEFENDER_FIREWALL"
+            else:
+                ipt = shutil.which("iptables")
+                if not ipt:
+                    return False, "AUCUN", "iptables est introuvable sur l'hôte."
+                verif = subprocess.run([ipt, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"],
+                                       capture_output=True, stdin=subprocess.DEVNULL, timeout=5)
+                if verif.returncode == 0:
+                    return True, "IPTABLES", "Règle déjà présente."
+                res = subprocess.run([ipt, "-I", "INPUT", "-s", clean_ip, "-j", "DROP"],
+                                     capture_output=True, stdin=subprocess.DEVNULL, timeout=5)
+                mode = "IPTABLES"
+        except Exception as exc:
+            logger.warning("Blocage d'adresse IP au pare-feu en échec : %s", exc)
+            return False, "AUCUN", str(exc)[:200]
+        if res.returncode == 0:
+            return True, mode, "Règle créée."
+        err = (res.stderr or res.stdout or b"").decode("utf-8", errors="ignore").strip()
+        return False, mode, err[:200] or "droits administrateur requis"
 
     @staticmethod
     def block_ip_address(
@@ -403,94 +408,56 @@ class SecurityService:
         user: Optional[User] = None,
     ) -> Dict[str, Any]:
         """
-        Rôle : Bloque une adresse IP malveillante via le Pare-feu Windows (netsh advfirewall) si disponible,
-               met à jour l'incident de sécurité en base et consigne la remédiation dans le journal d'audit.
-        Entrées : Session DB, IP source, ID incident optionnel, ID équipement optionnel, motif, utilisateur.
-        Sorties : Dictionnaire confirmant le blocage et le mode d'application.
+        Rôle : Bloque une adresse IP au pare-feu de l'hôte. Le blocage n'est déclaré (et l'incident
+               n'est marqué « BLOQUÉ ») que si la règle a réellement été créée.
+        Sorties : status BLOCKED, ou NOT_APPLIED avec la raison. ValueError si l'IP n'est pas valide.
         """
         clean_ip = source_ip.split(" ")[0].strip()
-        rule_name = f"Sentinelle_Block_{clean_ip.replace('.', '_').replace('*', 'x')}"
-        firewall_mode = "ACL_DATABASE_ENFORCED"
+        try:
+            clean_ip = str(ipaddress.ip_address(clean_ip))
+        except ValueError:
+            raise ValueError("Adresse IP invalide : une IP complète est nécessaire (les IP anonymisées ne peuvent pas être bloquées).")
+        rule_name = f"Sentinelle_Block_{clean_ip.replace('.', '_').replace(':', '_')}"
 
-        # Tentative d'ajout réel dans le pare-feu Windows (si exécuté avec droits Administrateur Windows)
-        if platform.system() == "Windows" and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", clean_ip):
-            no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-            try:
-                res = subprocess.run(
-                    [
-                        "netsh",
-                        "advfirewall",
-                        "firewall",
-                        "add",
-                        "rule",
-                        f"name={rule_name}",
-                        "dir=in",
-                        "action=block",
-                        f"remoteip={clean_ip}",
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL,
-                    creationflags=no_win,
-                    startupinfo=_hidden_startupinfo(),
-                    timeout=3.0,
-                )
-                if res.returncode == 0:
-                    firewall_mode = "WINDOWS_DEFENDER_FIREWALL"
-            except Exception:
-                pass
+        applied, firewall_mode, detail = SecurityService._apply_firewall_block(clean_ip, rule_name)
+        if not applied:
+            log_audit_action(db=db, action="FIREWALL_BLOCK_FAILED", cible=clean_ip, user=user,
+                             details=f"{motif} | Échec : {detail}")
+            return {
+                "status": "NOT_APPLIED", "source_ip": clean_ip, "rule_name": rule_name,
+                "firewall_mode": firewall_mode,
+                "message": f"Aucune règle de pare-feu n'a été créée pour {clean_ip} : {detail}",
+            }
 
-        # Mettre à jour l'événement de sécurité correspondant en base
         ev = None
         if incident_id:
             ev = db.query(EvenementSecurite).filter(EvenementSecurite.id == incident_id).first()
         if not ev:
             ev = (
                 db.query(EvenementSecurite)
-                .filter(
-                    (EvenementSecurite.source_ip == clean_ip)
-                    | (EvenementSecurite.source_ip_anonymisee == clean_ip)
-                )
+                .filter(EvenementSecurite.source_ip == clean_ip)
                 .order_by(EvenementSecurite.horodatage.desc())
                 .first()
             )
-        if ev:
-            if "[BLOQUÉ]" not in (ev.explication or ""):
-                ev.explication = f"[BLOQUÉ] {ev.explication or ''} (Règle {rule_name} appliquée)".strip()
+        if ev and "[BLOQUÉ]" not in (ev.explication or ""):
+            ev.explication = f"[BLOQUÉ] {ev.explication or ''} (Règle {rule_name} appliquée)".strip()
 
-        # Résoudre les alertes de sécurité actives associées à cette IP
-        ip_prefix = clean_ip.split(".")[0] if "." in clean_ip else clean_ip
-        active_alerts = (
-            db.query(Alerte)
-            .filter(
-                Alerte.module_origine == "Sécurité",
-                Alerte.statut == "Active",
-                Alerte.message.like(f"%{ip_prefix}%"),
-            )
-            .all()
-        )
+        anon = anonymize_ip_rgpd(clean_ip)
         now = datetime.now(timezone.utc)
-        for al in active_alerts:
+        for al in db.query(Alerte).filter(
+            Alerte.module_origine == "Sécurité", Alerte.statut == "Active", Alerte.titre.like(f"%({anon})%"),
+        ).all():
             al.statut = "Résolue"
             al.date_acquittement = now
             al.acquittee_par = user.identifiant if user else "SOC-AutoBlock"
-
         db.commit()
 
-        log_audit_action(
-            db=db,
-            action="FIREWALL_BLOCK_IP",
-            cible=f"{clean_ip} ({rule_name})",
-            user=user,
-            details=f"{motif} | Mode: {firewall_mode}",
-        )
-
+        log_audit_action(db=db, action="FIREWALL_BLOCK_IP", cible=f"{clean_ip} ({rule_name})", user=user,
+                         details=f"{motif} | Mode: {firewall_mode}")
         return {
-            "status": "BLOCKED",
-            "source_ip": clean_ip,
-            "rule_name": rule_name,
+            "status": "BLOCKED", "source_ip": clean_ip, "rule_name": rule_name,
             "firewall_mode": firewall_mode,
-            "message": f"Règle de pare-feu '{rule_name}' active pour {clean_ip}.",
+            "message": f"Règle de pare-feu '{rule_name}' créée pour {clean_ip} ({firewall_mode}).",
         }
 
     @staticmethod
@@ -502,7 +469,8 @@ class SecurityService:
         user: Optional[User] = None,
     ) -> Dict[str, Any]:
         """
-        Rôle : Place un équipement en quarantaine de sécurité, crée une trace d'audit et met à jour son statut.
+        Rôle : Marque un équipement « Quarantaine SOC » dans Sentinelle (groupe, alerte, audit).
+               AUCUNE action réseau n'est exécutée : l'isolement effectif (VLAN, ACL, port) reste à faire.
         Entrées : Session DB, nom de l'équipement, ID optionnel, motif, utilisateur.
         Sorties : Dictionnaire de confirmation d'isolement.
         """
@@ -521,8 +489,8 @@ class SecurityService:
                 equipement_id=eq.id,
                 module_origine="Sécurité",
                 severite="WARNING",
-                titre=f"Équipement isolé en quarantaine : {eq.nom}",
-                message=f"L'équipement {eq.nom} ({eq.ip}) a été placé en quarantaine réseau ({motif}).",
+                titre=f"Équipement marqué en quarantaine : {eq.nom}",
+                message=f"L'équipement {eq.nom} ({eq.ip}) a été marqué en quarantaine dans Sentinelle ({motif}). Aucune action réseau exécutée.",
                 statut="Acquittée",
                 date_creation=now,
                 date_acquittement=now,
@@ -536,68 +504,13 @@ class SecurityService:
             action="DEVICE_ISOLATE",
             cible=target_label,
             user=user,
-            details=f"Isolement réseau activé : {motif}",
+            details=f"Marquage quarantaine (sans action réseau) : {motif}",
         )
 
         return {
-            "status": "ISOLATED",
+            "status": "QUARANTINE_MARKED",
             "device": target_label,
-            "message": f"Équipement {target_label} placé en quarantaine SOC et journalisé.",
+            "network_action_performed": False,
+            "message": (f"{target_label} est marqué « Quarantaine SOC » dans Sentinelle. "
+                        "Aucune action réseau n'a été exécutée : isolez l'équipement (VLAN, ACL, port) séparément."),
         }
-
-    @staticmethod
-    def simulate_bruteforce_attack(
-        db: Session,
-        equipement_id: int,
-        attacker_ip: str = "198.51.100.45",
-        target_server_name: str = "SRV-APP-01",
-    ) -> Dict[str, Any]:
-        """Injecte une rafale d'échecs SSH et exécute la détection Isolation Forest avec corrélation CPU."""
-        now = datetime.now(timezone.utc)
-        equipement = db.query(Equipement).filter(Equipement.id == equipement_id).first()
-
-        sample_logs = [
-            f"Failed password for invalid user admin from {attacker_ip} port 43210 ssh2",
-            f"Failed password for invalid user test from {attacker_ip} port 43211 ssh2",
-            f"Failed password for invalid user oracle from {attacker_ip} port 43212 ssh2",
-            f"Failed password for invalid user postgres from {attacker_ip} port 43213 ssh2",
-            f"Failed password for root from {attacker_ip} port 43214 ssh2",
-            f"Failed password for root from {attacker_ip} port 43215 ssh2",
-            f"Failed password for root from {attacker_ip} port 43216 ssh2",
-            f"Failed password for debian from {attacker_ip} port 43217 ssh2",
-            f"Failed password for debian from {attacker_ip} port 43218 ssh2",
-            f"Failed password for debian from {attacker_ip} port 43219 ssh2",
-            "Accepted password for debian from 192.168.1.50 port 50201 ssh2",
-            "Accepted password for sysadmin from 192.168.1.51 port 50202 ssh2",
-        ]
-
-        result = SecurityService.train_and_detect_anomalies(db, sample_logs, equipement_id=equipement_id)
-
-        if equipement:
-            db.add(Metrique(equipement_id=equipement.id, type_metrique="cpu_percent", valeur=72.5, horodatage=now))
-
-            corr_id = f"CORR-{int(now.timestamp())}"
-            alerte_corr = Alerte(
-                equipement_id=equipement.id,
-                module_origine="Sécurité",
-                severite="CRITICAL",
-                titre="Corrélation d'incident multi-modules",
-                message=(
-                    f"Corrélation établie sur {equipement.nom} : Rafale brute-force SSH ({anonymize_ip_rgpd(attacker_ip)}) "
-                    f"corrélée avec une hausse anormale de la charge CPU (72.5%)."
-                ),
-                statut="Active",
-                correlation_id=corr_id,
-                date_creation=now,
-            )
-            db.add(alerte_corr)
-            db.commit()
-
-        log_audit_action(
-            db=db,
-            action="SIMULATION_BRUTEFORCE",
-            cible=f"{target_server_name} ({attacker_ip})",
-            details="Test d'intrusion : 10 échecs SSH analysés par Isolation Forest et corrélés avec la supervision.",
-        )
-
-        return result

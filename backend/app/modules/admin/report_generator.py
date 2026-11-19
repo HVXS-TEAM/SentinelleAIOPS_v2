@@ -157,7 +157,7 @@ def generate_audit_pdf(
     # 1. En-tête officiel Sentinelle
     now_str = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
     story.append(Paragraph("🛡️ SENTINELLE AIOPS — AUDIT OFFICIEL D'INFRASTRUCTURE", header_style))
-    story.append(Paragraph(f"Plateforme de Supervision Prédictive & Cybersécurité • BTS SIO SISR", subtitle_style))
+    story.append(Paragraph(f"Plateforme de Supervision Prédictive & Cybersécurité", subtitle_style))
     story.append(Spacer(1, 8))
 
     meta_info = [
@@ -345,7 +345,7 @@ def generate_audit_pdf(
 
     # Pied de page & signature
     footer_text = (
-        f"<b>Sentinelle AIOps v2.4.1</b> — Document d'audit confidentiel à usage interne et d'évaluation BTS SIO SISR.<br/>"
+        f"<b>Sentinelle AIOps v2.4.1</b> — Document d'audit confidentiel à usage interne.<br/>"
         f"Empreinte numérique certifiée SHA-256 disponible dans le journal d'audit de la base SQLite."
     )
     story.append(Paragraph(footer_text, meta_style))

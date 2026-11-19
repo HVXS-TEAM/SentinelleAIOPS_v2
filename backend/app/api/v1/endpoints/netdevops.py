@@ -12,10 +12,12 @@ Routes :
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from backend.app.api.deps import ROLES_OPERATEURS, get_current_user, require_roles
 from backend.app.modules.netdevops.service import (
+    ConfigUnavailableError,
     get_available_devices,
     get_config_diff,
     get_device_backups,
@@ -24,7 +26,11 @@ from backend.app.modules.netdevops.service import (
     run_audit,
 )
 
-router = APIRouter(prefix="/netdevops", tags=["NetDevOps"])
+router = APIRouter(
+    prefix="/netdevops",
+    tags=["NetDevOps"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class RemediateRequest(BaseModel):
@@ -50,7 +56,11 @@ def list_devices() -> list[dict]:
     return get_available_devices()
 
 
-@router.post("/audit/{device_id}", summary="Audit CIS Benchmark d'un équipement")
+@router.post(
+    "/audit/{device_id}",
+    summary="Audit CIS Benchmark d'un équipement",
+    dependencies=[Depends(require_roles(ROLES_OPERATEURS))],
+)
 async def audit_device(device_id: str) -> dict:
     """
     Rôle : Lance un audit CIS Level 1 sur l'équipement spécifié.
@@ -62,6 +72,8 @@ async def audit_device(device_id: str) -> dict:
     """
     try:
         return await run_audit(device_id)
+    except ConfigUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -76,6 +88,8 @@ def device_backups(device_id: str) -> list[dict]:
     """
     try:
         return get_device_backups(device_id)
+    except ConfigUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -97,11 +111,17 @@ def config_diff(
         if "error" in result:
             raise HTTPException(status_code=422, detail=result["error"])
         return result
+    except ConfigUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/remediate/{device_id}", summary="Application d'une remédiation CIS sur un équipement")
+@router.post(
+    "/remediate/{device_id}",
+    summary="Application d'une remédiation CIS sur un équipement",
+    dependencies=[Depends(require_roles(ROLES_OPERATEURS))],
+)
 async def remediate_device(device_id: str, payload: RemediateRequest) -> dict:
     """
     Rôle : Applique un script de remédiation CIS sur l'équipement (via SSH si disponible + persistance SQLite),
@@ -116,11 +136,17 @@ async def remediate_device(device_id: str, payload: RemediateRequest) -> dict:
             remediation_commands=payload.remediation_snippet,
             finding_id=payload.rule_id,
         )
+    except ConfigUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/restore/{device_id}", summary="Restauration d'une sauvegarde de configuration")
+@router.post(
+    "/restore/{device_id}",
+    summary="Restauration d'une sauvegarde de configuration",
+    dependencies=[Depends(require_roles(ROLES_OPERATEURS))],
+)
 async def restore_device_config(device_id: str, payload: RestoreBackupRequest) -> dict:
     """
     Rôle : Restaure une configuration antérieure sur un équipement à partir de son historique de sauvegardes.
@@ -133,5 +159,7 @@ async def restore_device_config(device_id: str, payload: RestoreBackupRequest) -
             device_id=device_id,
             backup_index=payload.backup_index,
         )
+    except ConfigUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

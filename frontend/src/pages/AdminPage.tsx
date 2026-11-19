@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '../components/ui/Icon';
-import { adminService } from '../services/api';
+import { adminService, parcService } from '../services/api';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 interface User {
@@ -31,115 +31,41 @@ interface Report {
   period: string;
 }
 
-/* ── Données conformes à la maquette de référence ────────────────────────── */
-const INITIAL_USERS: User[] = [
-  {
-    id: 'u1',
-    nom: 'Sarah Connor',
-    email: 's.connor@sentinelle.io',
-    role: 'ADMINISTRATEUR',
-    mfa: true,
-    status: 'actif',
-    lastLogin: "Aujourd'hui, 08:14",
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
-  },
-  {
-    id: 'u2',
-    nom: 'David Bowman',
-    email: 'd.bowman@sentinelle.io',
-    role: 'TECHNICIEN',
-    mfa: true,
-    status: 'actif',
-    lastLogin: 'Hier, 16:45',
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces',
-  },
-  {
-    id: 'u3',
-    nom: 'Ellen Ripley',
-    email: 'e.ripley@audit.ext',
-    role: 'VISITEUR',
-    mfa: false,
-    status: 'inactif',
-    lastLogin: '02 Mars, 09:00',
-    initials: 'ER',
-  },
+/* ── Modèles de rapport (le PDF est généré à la demande par l'API, aucune donnée fictive) ── */
+const REPORT_TEMPLATES: Report[] = [
+  { id: 'r1', title: 'Audit Sécurité', date: 'À la demande', period: 'Période courante' },
+  { id: 'r2', title: 'Synthèse Performance', date: 'À la demande', period: 'Période courante' },
+  { id: 'r3', title: 'Inventaire du Parc', date: 'À la demande', period: 'Instantané' },
 ];
 
-const INITIAL_AUDIT_LOGS: AuditLog[] = [
-  {
-    id: 'l1',
-    horodatage: '2024-03-05T08:15:22Z',
-    utilisateur: 's.connor',
-    action: 'AUTH_SUCCESS',
-    cible: 'auth.gateway.main',
-    status: 200,
-  },
-  {
-    id: 'l2',
-    horodatage: '2024-03-05T08:18:41Z',
-    utilisateur: 's.connor',
-    action: 'CONF_UPDATE',
-    cible: 'fw-core-eu-west',
-    status: 200,
-  },
-  {
-    id: 'l3',
-    horodatage: '2024-03-05T09:02:11Z',
-    utilisateur: 'system.auto',
-    action: 'ALERT_TRIGGER',
-    cible: 'db-cluster-01.cpu',
-    status: 'CRIT',
-  },
-  {
-    id: 'l4',
-    horodatage: '2024-03-05T09:05:00Z',
-    utilisateur: 'd.bowman',
-    action: 'AUTH_SUCCESS',
-    cible: 'auth.gateway.vpn',
-    status: 200,
-  },
-  {
-    id: 'l5',
-    horodatage: '2024-03-05T09:12:33Z',
-    utilisateur: 'd.bowman',
-    action: 'SERVICE_RESTART',
-    cible: 'db-cluster-01.node-a',
-    status: 200,
-  },
-];
+const ROLE_API: Record<User['role'], 'Administrateur' | 'Technicien' | 'Visiteur'> = {
+  ADMINISTRATEUR: 'Administrateur',
+  TECHNICIEN: 'Technicien',
+  VISITEUR: 'Visiteur',
+};
 
-const INITIAL_REPORTS: Report[] = [
-  {
-    id: 'r1',
-    title: 'Audit Sécurité Hebdomadaire',
-    date: '04 Mars 2024',
-    period: 'S9 (Fév 26 - Mar 03)',
-  },
-  {
-    id: 'r2',
-    title: 'Synthèse Perf. Mensuelle',
-    date: '01 Mars 2024',
-    period: 'Février 2024',
-  },
-  {
-    id: 'r3',
-    title: 'Inventaire Parc Actif',
-    date: '01 Mars 2024',
-    period: 'T1 - Ad Hoc',
-  },
-];
+const apiErrorDetail = (err: unknown, fallback: string): string => {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === 'string' ? detail : fallback;
+};
+
+const generatePassword = (): string => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#$%';
+  const bytes = crypto.getRandomValues(new Uint32Array(16));
+  return Array.from(bytes, n => alphabet[n % alphabet.length]).join('');
+};
 
 export const AdminPage: React.FC = () => {
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
-  const [reports, setReports] = useState<Report[]>(INITIAL_REPORTS);
+  const [users, setUsers] = useState<User[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [reports, setReports] = useState<Report[]>(REPORT_TEMPLATES);
 
   /* États synchronisation */
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
 
   /* États notifications (Mode Réel par défaut) */
-  const [demoMode, setDemoMode] = useState<boolean>(false);
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [telegramEnabled, setTelegramEnabled] = useState(true);
   const [discordEnabled, setDiscordEnabled] = useState(false);
@@ -160,6 +86,9 @@ export const AdminPage: React.FC = () => {
   /* Modale Utilisateur */
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [newIdentifiant, setNewIdentifiant] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [modalError, setModalError] = useState<string | null>(null);
 
   /* Toast de feedback */
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -178,37 +107,25 @@ export const AdminPage: React.FC = () => {
   /* États et configuration des canaux de notification */
   const [configChannel, setConfigChannel] = useState<'telegram' | 'discord' | 'email' | null>(null);
   const [isTestingChannel, setIsTestingChannel] = useState(false);
+  const [telegramTokenSet, setTelegramTokenSet] = useState(false);
+  const [discordWebhookSet, setDiscordWebhookSet] = useState(false);
   const [telegramConfig, setTelegramConfig] = useState({
-    botToken: '6892348123:AAHk...8qQ',
-    chatId: '@sentinelle_ops_bot',
+    botToken: '',
+    chatId: '',
   });
   const [discordConfig, setDiscordConfig] = useState({
-    webhookUrl: 'https://discord.com/api/webhooks/1218.../alert',
+    webhookUrl: '',
   });
   const [emailConfig, setEmailConfig] = useState({
-    smtpServer: 'smtp.sentinelle.local',
+    smtpServer: '',
     smtpPort: '587',
-    recipient: 'alertes-infra@sentinelle.local',
+    recipient: '',
   });
 
   /* Test d'envoi réel d'alerte sur un canal via l'API */
   const handleTestChannel = async (channel: 'telegram' | 'discord' | 'email') => {
     setIsTestingChannel(true);
     try {
-      if (demoMode) {
-        // Mode Simulation E6 : Garantit une démonstration fluide sans dépendance de serveur tiers
-        await new Promise(resolve => setTimeout(resolve, 800)); // Latence réseau simulée
-        if (channel === 'email') {
-          showToast(`[DÉMO E6] Alerte SMTP émise avec succès vers ${emailConfig.recipient} (Relais smtp.sentinelle.local:587 validé).`);
-        } else if (channel === 'telegram') {
-          showToast(`[DÉMO E6] Notification push Telegram relayée vers le Chat ID ${telegramConfig.chatId || 'Défaut'}.`);
-        } else if (channel === 'discord') {
-          showToast(`[DÉMO E6] Payload JSON injecté avec succès sur le Webhook Discord.`);
-        }
-        return;
-      }
-
-      // Mode Réel (si serveur SMTP physique actif dans le lab)
       if (channel === 'telegram') {
         showToast('Transmission de l\'alerte test vers Telegram...');
         const res = await adminService.testNotificationChannel({
@@ -245,33 +162,23 @@ export const AdminPage: React.FC = () => {
         showToast(res.message);
       }
     } catch (err: any) {
-      // Si le serveur réel échoue, basculer sur une explication claire et proposer la simulation
       const detail = err?.response?.data?.detail || err?.message || 'Erreur réseau';
-      showToast(`Échec du serveur distant (${detail}). Activez le Mode Simulation E6 pour la démo.`);
+      showToast(`Échec de l'envoi du test : ${detail}`);
     } finally {
       setIsTestingChannel(false);
     }
   };
 
-  /* Révocation réelle d'un utilisateur */
+  /* Désactivation réelle d'un compte (le serveur refuse son propre compte et le dernier administrateur) */
   const handleConfirmRevoke = async () => {
     if (!userToRevoke) return;
     setIsRevoking(true);
-    const userIdNum = parseInt(userToRevoke.id, 10);
     try {
-      if (!isNaN(userIdNum)) {
-        await adminService.toggleUserStatus(userIdNum);
-      }
-      setUsers(prev =>
-        prev.map(u => (u.id === userToRevoke.id ? { ...u, status: 'inactif' as const } : u))
-      );
+      await adminService.toggleUserStatus(parseInt(userToRevoke.id, 10));
       showToast(`Accès révoqués pour ${userToRevoke.nom}. Le compte est désormais inactif.`);
       await fetchLiveUsers();
-    } catch {
-      setUsers(prev =>
-        prev.map(u => (u.id === userToRevoke.id ? { ...u, status: 'inactif' as const } : u))
-      );
-      showToast(`Accès révoqués pour ${userToRevoke.nom}.`);
+    } catch (err) {
+      showToast(apiErrorDetail(err, `Échec de la révocation de ${userToRevoke.nom}.`));
     } finally {
       setIsRevoking(false);
       setUserToRevoke(null);
@@ -280,22 +187,12 @@ export const AdminPage: React.FC = () => {
 
   /* Bascule d'activation directe d'un compte */
   const handleToggleUserStatus = async (user: User) => {
-    const nextStatus = user.status === 'actif' ? 'inactif' : 'actif';
-    const userIdNum = parseInt(user.id, 10);
     try {
-      if (!isNaN(userIdNum)) {
-        await adminService.toggleUserStatus(userIdNum);
-      }
-      setUsers(prev =>
-        prev.map(u => (u.id === user.id ? { ...u, status: nextStatus } : u))
-      );
-      showToast(`Compte ${user.nom} basculé en statut : ${nextStatus.toUpperCase()}`);
+      await adminService.toggleUserStatus(parseInt(user.id, 10));
+      showToast(`Statut de ${user.nom} mis à jour.`);
       await fetchLiveUsers();
-    } catch {
-      setUsers(prev =>
-        prev.map(u => (u.id === user.id ? { ...u, status: nextStatus } : u))
-      );
-      showToast(`Statut de ${user.nom} mis à jour : ${nextStatus}`);
+    } catch (err) {
+      showToast(apiErrorDetail(err, `Échec de la mise à jour du statut de ${user.nom}.`));
     }
   };
 
@@ -303,7 +200,7 @@ export const AdminPage: React.FC = () => {
   const fetchLiveUsers = async () => {
     try {
       const live = await adminService.getUsers();
-      if (Array.isArray(live) && live.length > 0) {
+      if (Array.isArray(live)) {
         const mapped: User[] = live.map((u: any) => {
           let roleVal: 'ADMINISTRATEUR' | 'TECHNICIEN' | 'VISITEUR' = 'TECHNICIEN';
           if (u.role?.toUpperCase() === 'ADMINISTRATEUR' || u.role?.toUpperCase() === 'ADMIN') {
@@ -323,9 +220,10 @@ export const AdminPage: React.FC = () => {
           };
         });
         setUsers(mapped);
+        setUsersError(null);
       }
-    } catch {
-      // Repli gracieux en mode déconnecté
+    } catch (err) {
+      setUsersError(apiErrorDetail(err, 'Impossible de charger les comptes utilisateurs.'));
     }
   };
 
@@ -333,7 +231,7 @@ export const AdminPage: React.FC = () => {
   const fetchLiveAuditLogs = async () => {
     try {
       const logs = await adminService.getAuditLogs(50);
-      if (Array.isArray(logs) && logs.length > 0) {
+      if (Array.isArray(logs)) {
         const mappedLogs: AuditLog[] = logs.map((l: any) => ({
           id: `log-${l.id}`,
           horodatage: l.horodatage ? new Date(l.horodatage).toISOString() : new Date().toISOString(),
@@ -364,36 +262,28 @@ export const AdminPage: React.FC = () => {
     try {
       const cfg = await adminService.getNotificationConfig();
       if (cfg) {
-        setDemoMode(Boolean(cfg.demo_mode));
         setEmailEnabled(Boolean(cfg.email_enabled));
         setTelegramEnabled(Boolean(cfg.telegram_enabled));
         setDiscordEnabled(Boolean(cfg.discord_enabled));
-        if (cfg.telegram_token || cfg.telegram_chat_id) {
-          setTelegramConfig({
-            botToken: cfg.telegram_token || '',
-            chatId: cfg.telegram_chat_id || '',
-          });
-        }
-        if (cfg.discord_webhook) {
-          setDiscordConfig({ webhookUrl: cfg.discord_webhook });
-        }
-        if (cfg.smtp_server || cfg.email_recipient) {
-          setEmailConfig({
-            smtpServer: cfg.smtp_server || 'smtp.gmail.com',
-            smtpPort: String(cfg.smtp_port || 587),
-            recipient: cfg.email_recipient || 'admin@sentinelle.local',
-          });
-        }
+        // Les secrets ne sont jamais renvoyés par l'API : seul un indicateur « enregistré » est connu.
+        setTelegramTokenSet(Boolean(cfg.telegram_token_set));
+        setDiscordWebhookSet(Boolean(cfg.discord_webhook_set));
+        setTelegramConfig({ botToken: '', chatId: cfg.telegram_chat_id || '' });
+        setDiscordConfig({ webhookUrl: '' });
+        setEmailConfig({
+          smtpServer: cfg.smtp_server || '',
+          smtpPort: String(cfg.smtp_port || 587),
+          recipient: cfg.email_recipient || '',
+        });
       }
     } catch {
       // Tolérance
     }
   };
 
-  const persistNotificationSettings = async (overrideDemo?: boolean) => {
+  const persistNotificationSettings = async (): Promise<boolean> => {
     try {
       await adminService.saveNotificationConfig({
-        demo_mode: overrideDemo !== undefined ? overrideDemo : demoMode,
         telegram_enabled: telegramEnabled,
         telegram_token: telegramConfig.botToken,
         telegram_chat_id: telegramConfig.chatId,
@@ -405,8 +295,9 @@ export const AdminPage: React.FC = () => {
         email_recipient: emailConfig.recipient,
         email_use_tls: true,
       });
+      return true;
     } catch {
-      // Tolérance
+      return false;
     }
   };
 
@@ -417,17 +308,16 @@ export const AdminPage: React.FC = () => {
     fetchNotificationSettings();
   }, []);
 
-  const handleSwitchRealNetwork = async () => {
+  const handleDiscoverNetwork = async () => {
     setIsSwitchingReal(true);
-    showToast('Scan et découverte active des équipements physiques du réseau local...');
+    showToast('Découverte active du réseau local (ARP / ICMP / ports)...');
     try {
-      const res = await adminService.switchToRealNetworkOnly();
+      const res = await parcService.scanRealNetwork();
       await fetchLiveAuditLogs();
-      showToast(
-        `Découverte réseau terminée : ${res?.discovered_lan_devices ?? 0} équipements détectés, ${res?.total_active_equipments ?? 1} actifs sous supervision !`,
-      );
+      const nouveaux = res.devices.filter((d) => !d.already_in_parc).length;
+      showToast(`Découverte terminée sur ${res.subnet} : ${res.devices_count} hôte(s) détecté(s), ${nouveaux} absent(s) du parc.`);
     } catch {
-      showToast('Erreur lors de la découverte du réseau physique réel.');
+      showToast('Découverte impossible : le scan réseau a échoué.');
     } finally {
       setIsSwitchingReal(false);
     }
@@ -533,22 +423,107 @@ export const AdminPage: React.FC = () => {
     }
   };
 
-  /* Bascule MFA d'un utilisateur */
-  const handleToggleMfa = (userId: string) => {
-    setUsers(prev =>
-      prev.map(u => {
-        if (u.id === userId) {
-          const nextMfa = !u.mfa;
-          showToast(`MFA ${nextMfa ? 'activé' : 'désactivé'} pour ${u.nom}.`);
-          return { ...u, mfa: nextMfa };
-        }
-        return u;
-      })
-    );
+  /* Réinitialisation réelle du MFA (appareil perdu) : l'utilisateur se ré-enrôle depuis « Sécurité du compte » */
+  const [userToResetPwd, setUserToResetPwd] = useState<User | null>(null);
+  const [newPwd, setNewPwd] = useState('');
+
+  /* Code de réinitialisation à usage unique : affiché une seule fois, à transmettre à l'utilisateur */
+  const [codeEmis, setCodeEmis] = useState<{ identifiant: string; code: string; expire: number } | null>(null);
+
+  const handleGenerateResetCode = async (user: User) => {
+    try {
+      const res = await adminService.generateResetCode(parseInt(user.id, 10));
+      setCodeEmis({ identifiant: res.identifiant, code: res.code, expire: res.expire_dans_minutes });
+    } catch (err) {
+      showToast(apiErrorDetail(err, `Impossible de générer un code pour ${user.nom}.`));
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!userToResetPwd) return;
+    try {
+      await adminService.resetUserPassword(parseInt(userToResetPwd.id, 10), newPwd);
+      showToast(`Mot de passe réinitialisé pour ${userToResetPwd.nom}.`);
+      setUserToResetPwd(null);
+      setNewPwd('');
+    } catch (err) {
+      showToast(apiErrorDetail(err, `Échec de la réinitialisation du mot de passe de ${userToResetPwd.nom}.`));
+    }
+  };
+
+  const handleResetMfa = async (user: User) => {
+    if (!user.mfa) return;
+    if (!window.confirm(`Réinitialiser l'authentification à deux facteurs de ${user.nom} ?`)) return;
+    try {
+      await adminService.resetUserMfa(parseInt(user.id, 10));
+      showToast(`MFA réinitialisé pour ${user.nom}.`);
+      await fetchLiveUsers();
+    } catch (err) {
+      showToast(apiErrorDetail(err, `Échec de la réinitialisation du MFA de ${user.nom}.`));
+    }
   };
 
   return (
     <div className="flex flex-col h-full w-full bg-[#101416] text-[#dfe4e0] font-sans overflow-y-auto p-4 md:p-6 pb-16">
+      {codeEmis && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Code de réinitialisation">
+          <div className="w-full max-w-sm bg-[#161c22] border border-[#272a2d] rounded-xl p-5 space-y-3 text-xs text-[#bdc9c3]">
+            <h2 className="font-mono font-bold uppercase tracking-wider text-[#78d8ba]">
+              Code de réinitialisation : {codeEmis.identifiant}
+            </h2>
+            <p data-testid="code-emis" className="text-center text-2xl font-mono font-bold tracking-widest text-white select-all">
+              {codeEmis.code}
+            </p>
+            <p>
+              Transmettez ce code à l'utilisateur : il le saisit dans « Mot de passe oublié » puis choisit lui-même son nouveau mot de passe.
+              Il expire dans {codeEmis.expire} minutes, ne sert qu'une fois et ne sera plus affiché.
+            </p>
+            <div className="flex justify-end">
+              <button
+                id="admin-reset-code-close-btn"
+                onClick={() => setCodeEmis(null)}
+                className="px-3 py-1.5 rounded bg-[#78d8ba] text-[#002118] font-bold cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {userToResetPwd && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Réinitialiser le mot de passe">
+          <div className="w-full max-w-sm bg-[#161c22] border border-[#272a2d] rounded-xl p-5 space-y-3 text-xs text-[#bdc9c3]">
+            <h2 className="font-mono font-bold uppercase tracking-wider text-[#78d8ba]">
+              Nouveau mot de passe : {userToResetPwd.nom}
+            </h2>
+            <input
+              type="password"
+              aria-label="Nouveau mot de passe du compte"
+              autoComplete="new-password"
+              value={newPwd}
+              onChange={e => setNewPwd(e.target.value)}
+              placeholder="12 caractères min., lettres et chiffres"
+              className="w-full px-3 py-2 rounded-lg bg-[#222b33] border border-[#3a4a44] text-[#dae3ee] font-mono text-sm focus:outline-none focus:border-[#00f2c3]"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setUserToResetPwd(null)}
+                className="flex-1 py-2 rounded-lg bg-[#262b29] border border-[#3e4945] text-[#dfe4e0] cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleResetPassword}
+                disabled={newPwd.length < 12}
+                className="flex-1 py-2 rounded-lg bg-[#00f2c3] text-[#002118] font-bold disabled:opacity-60 cursor-pointer"
+              >
+                Réinitialiser
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Toast de notification ────────────────────────────────────── */}
       {toastMessage && (
         <div className="fixed top-20 right-6 z-50 bg-[#1c211e] border border-[#78d8ba] text-[#dfe4e0] px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 text-xs font-medium animate-in slide-in-from-top-2 duration-200">
@@ -571,7 +546,7 @@ export const AdminPage: React.FC = () => {
           {/* Bouton Découverte Réseau Local Physique */}
           <button
             id="admin-real-network-btn"
-            onClick={handleSwitchRealNetwork}
+            onClick={handleDiscoverNetwork}
             disabled={isSwitchingReal}
             className="px-3.5 py-2 rounded-md border border-[#78d8ba] bg-[#78d8ba]/15 text-[#78d8ba] hover:bg-[#78d8ba]/25 text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
             title="Découvrir et inventorier automatiquement tous les équipements physiques actifs sur votre réseau local (ARP / ICMP / SNMP / Ports)"
@@ -641,6 +616,9 @@ export const AdminPage: React.FC = () => {
                 <button
                   id="admin-add-user-btn"
                   onClick={() => {
+                    setNewIdentifiant('');
+                    setNewPassword(generatePassword());
+                    setModalError(null);
                     setEditingUser({
                       id: `u-${Date.now()}`,
                       nom: '',
@@ -667,6 +645,12 @@ export const AdminPage: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {usersError && (
+              <div role="alert" className="mx-4 mt-3 p-2.5 rounded bg-[#ffb4ab]/10 border border-[#ffb4ab]/30 text-xs text-[#ffb4ab]">
+                {usersError}
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs min-w-[620px]">
@@ -746,11 +730,12 @@ export const AdminPage: React.FC = () => {
                       {/* État MFA */}
                       <td className="px-4 py-3">
                         <button
-                          onClick={() => handleToggleMfa(u.id)}
-                          className={`flex items-center gap-1 text-xs font-medium cursor-pointer transition-colors ${
-                            u.mfa ? 'text-[#78d8ba]' : 'text-[#ffb4ab]'
+                          onClick={() => handleResetMfa(u)}
+                          disabled={!u.mfa}
+                          className={`flex items-center gap-1 text-xs font-medium transition-colors ${
+                            u.mfa ? 'text-[#78d8ba] cursor-pointer' : 'text-[#87938e] cursor-default'
                           }`}
-                          title="Cliquer pour basculer le MFA"
+                          title={u.mfa ? 'Cliquer pour réinitialiser le MFA de ce compte' : "Non activé : l'utilisateur l'active depuis « Sécurité du compte »"}
                         >
                           {u.mfa ? (
                             <>
@@ -776,6 +761,7 @@ export const AdminPage: React.FC = () => {
                         <div className="flex items-center justify-end gap-1.5 text-[#bdc9c3]">
                           <button
                             onClick={() => {
+                              setModalError(null);
                               setEditingUser(u);
                               setShowUserModal(true);
                             }}
@@ -783,6 +769,25 @@ export const AdminPage: React.FC = () => {
                             title="Modifier les privilèges"
                           >
                             <Icon name="edit" size="xs" />
+                          </button>
+                          <button
+                            id={`admin-reset-password-btn-${u.id}`}
+                            onClick={() => {
+                              setNewPwd('');
+                              setUserToResetPwd(u);
+                            }}
+                            className="p-1.5 rounded hover:text-[#78d8ba] hover:bg-white/5 transition-colors cursor-pointer"
+                            title="Réinitialiser le mot de passe (lève aussi le verrouillage)"
+                          >
+                            <Icon name="key" size="xs" />
+                          </button>
+                          <button
+                            id={`admin-reset-code-btn-${u.id}`}
+                            onClick={() => handleGenerateResetCode(u)}
+                            className="p-1.5 rounded hover:text-[#ffb95c] hover:bg-white/5 transition-colors cursor-pointer"
+                            title="Générer un code de réinitialisation à usage unique (mot de passe oublié)"
+                          >
+                            <Icon name="lock_reset" size="xs" />
                           </button>
                           <button
                             id={`admin-revoke-user-btn-${u.id}`}
@@ -969,7 +974,7 @@ export const AdminPage: React.FC = () => {
             )}
           </div>
 
-          {/* 4. Configuration Notifications avec Toggle Démo E6 */}
+          {/* 4. Configuration Notifications */}
           <div className="bg-[#191c1e] rounded-xl border border-[#272a2d] p-5 flex flex-col flex-1">
             <div className="flex items-center justify-between pb-3 border-b border-[#272a2d] mb-4">
               <div className="flex items-center gap-2 text-sm font-bold text-[#e0e3e6]">
@@ -1095,7 +1100,7 @@ export const AdminPage: React.FC = () => {
                     <div>
                       <div className="font-semibold">Discord (Webhook)</div>
                       <div className="text-[10px] text-[#87938e] font-mono truncate max-w-[140px] sm:max-w-[180px]">
-                        {discordConfig.webhookUrl}
+                        {discordWebhookSet ? 'Webhook enregistré' : 'Non configuré'}
                       </div>
                     </div>
                   </div>
@@ -1268,7 +1273,9 @@ export const AdminPage: React.FC = () => {
           <div className="w-full max-w-sm bg-[#181d1b] border border-[#3e4945] rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
             <div className="px-4 py-3 bg-[#1c211e] border-b border-[#3e4945] flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#dfe4e0]">
-                Modifier Privilèges : {editingUser.nom}
+                {users.some(u => u.id === editingUser.id)
+                  ? `Modifier le rôle : ${editingUser.nom}`
+                  : 'Nouveau compte utilisateur'}
               </h3>
               <button
                 onClick={() => setShowUserModal(false)}
@@ -1286,6 +1293,7 @@ export const AdminPage: React.FC = () => {
                 <input
                   type="text"
                   value={editingUser.nom}
+                  readOnly={users.some(u => u.id === editingUser.id)}
                   onChange={e => setEditingUser({ ...editingUser, nom: e.target.value })}
                   placeholder="Ex: Jean Dupont"
                   className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] focus:outline-none focus:border-[#78d8ba]"
@@ -1299,11 +1307,59 @@ export const AdminPage: React.FC = () => {
                 <input
                   type="email"
                   value={editingUser.email}
+                  readOnly={users.some(u => u.id === editingUser.id)}
                   onChange={e => setEditingUser({ ...editingUser, email: e.target.value })}
                   placeholder="jean.dupont@sentinelle.local"
                   className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] focus:outline-none focus:border-[#78d8ba]"
                 />
               </div>
+
+              {!users.some(u => u.id === editingUser.id) && (
+                <>
+                  <div>
+                    <label htmlFor="admin-new-identifiant" className="block text-[11px] font-semibold text-[#bdc9c3] mb-1">
+                      Identifiant de connexion
+                    </label>
+                    <input
+                      id="admin-new-identifiant"
+                      type="text"
+                      value={newIdentifiant}
+                      onChange={e => setNewIdentifiant(e.target.value.trim())}
+                      placeholder="Ex: jdupont (3 caractères minimum)"
+                      className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] font-mono focus:outline-none focus:border-[#78d8ba]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="admin-new-password" className="block text-[11px] font-semibold text-[#bdc9c3] mb-1">
+                      Mot de passe initial (8 caractères minimum)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="admin-new-password"
+                        type="text"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        className="flex-1 bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] font-mono focus:outline-none focus:border-[#78d8ba]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setNewPassword(generatePassword())}
+                        className="px-2 rounded bg-[#262b29] border border-[#3e4945] text-[#bdc9c3] hover:text-white cursor-pointer"
+                        title="Générer un mot de passe aléatoire"
+                      >
+                        <Icon name="refresh" size="xs" />
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#87938e]">Communiquez-le à l'utilisateur par un canal sûr.</p>
+                  </div>
+                </>
+              )}
+
+              {modalError && (
+                <div role="alert" className="p-2 rounded bg-[#ffb4ab]/10 border border-[#ffb4ab]/30 text-[#ffb4ab]">
+                  {modalError}
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-semibold text-[#bdc9c3] mb-1">
@@ -1333,34 +1389,35 @@ export const AdminPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!editingUser.nom.trim()) {
-                      showToast("Veuillez spécifier un nom d'utilisateur valide.");
-                      return;
-                    }
+                    setModalError(null);
                     const isNew = !users.some(u => u.id === editingUser.id);
-                    if (isNew) {
-                      const idStr = editingUser.nom.toLowerCase().replace(/[^a-z0-9]/g, '_');
-                      try {
+                    try {
+                      if (isNew) {
+                        if (!editingUser.nom.trim() || newIdentifiant.length < 3) {
+                          setModalError('Nom complet et identifiant (3 caractères minimum) requis.');
+                          return;
+                        }
+                        if (newPassword.length < 8) {
+                          setModalError('Le mot de passe doit comporter au moins 8 caractères.');
+                          return;
+                        }
                         await adminService.createUser({
-                          identifiant: idStr,
-                          email: editingUser.email || `${idStr}@sentinelle.local`,
-                          nom_complet: editingUser.nom,
-                          mot_de_passe: 'SentinellePass2026!',
-                          role: editingUser.role === 'ADMINISTRATEUR' ? 'Administrateur' : editingUser.role === 'VISITEUR' ? 'Visiteur' : 'Technicien',
+                          identifiant: newIdentifiant,
+                          email: editingUser.email.trim(),
+                          nom_complet: editingUser.nom.trim(),
+                          mot_de_passe: newPassword,
+                          role: ROLE_API[editingUser.role],
                         });
-                        showToast(`Utilisateur ${editingUser.nom} créé avec succès en base SQLite.`);
-                        await fetchLiveUsers();
-                      } catch {
-                        setUsers(prev => [editingUser, ...prev]);
-                        showToast(`Utilisateur ${editingUser.nom} ajouté.`);
+                        showToast(`Compte « ${newIdentifiant} » créé.`);
+                      } else {
+                        await adminService.updateUserRole(parseInt(editingUser.id, 10), ROLE_API[editingUser.role]);
+                        showToast(`Rôle de ${editingUser.nom} mis à jour.`);
                       }
-                    } else {
-                      setUsers(prev =>
-                        prev.map(u => (u.id === editingUser.id ? editingUser : u))
-                      );
-                      showToast(`Privilèges de ${editingUser.nom} mis à jour.`);
+                      await fetchLiveUsers();
+                      setShowUserModal(false);
+                    } catch (err) {
+                      setModalError(apiErrorDetail(err, "L'opération a échoué."));
                     }
-                    setShowUserModal(false);
                   }}
                   className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold hover:bg-[#78d8ba]/90 transition-colors cursor-pointer"
                 >
@@ -1468,7 +1525,7 @@ export const AdminPage: React.FC = () => {
                       value={telegramConfig.botToken}
                       onChange={e => setTelegramConfig(prev => ({ ...prev, botToken: e.target.value }))}
                       className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] font-mono text-[11px] focus:outline-none focus:border-[#78d8ba]"
-                      placeholder="ex: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                      placeholder={telegramTokenSet ? '•••••••• enregistré (laisser vide pour le conserver)' : 'ex: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ'}
                     />
                   </div>
                   <div>
@@ -1496,7 +1553,7 @@ export const AdminPage: React.FC = () => {
                     value={discordConfig.webhookUrl}
                     onChange={e => setDiscordConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
                     className="w-full bg-[#262b29] border border-[#3e4945] rounded p-2 text-[#dfe4e0] font-mono text-[11px] focus:outline-none focus:border-[#78d8ba]"
-                    placeholder="https://discord.com/api/webhooks/..."
+                    placeholder={discordWebhookSet ? '•••••••• enregistré (laisser vide pour le conserver)' : 'https://discord.com/api/webhooks/...'}
                   />
                 </div>
               )}
@@ -1565,9 +1622,13 @@ export const AdminPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={async () => {
-                      await persistNotificationSettings();
-                      showToast(`Paramètres du canal ${configChannel.toUpperCase()} chiffrés et enregistrés sur le serveur ✓`);
-                      setConfigChannel(null);
+                      const ok = await persistNotificationSettings();
+                      if (ok) {
+                        showToast(`Paramètres du canal ${configChannel.toUpperCase()} enregistrés sur le serveur.`);
+                        setConfigChannel(null);
+                      } else {
+                        showToast('Échec de l\'enregistrement : les paramètres n\'ont pas été sauvegardés.');
+                      }
                     }}
                     className="px-4 py-1.5 rounded bg-[#78d8ba] text-[#00382b] font-bold font-mono transition-colors cursor-pointer hover:bg-[#78d8ba]/90"
                   >

@@ -91,25 +91,25 @@ def test_pra_backup_and_integrity_verification():
         db.close()
 
 
-def test_api_admin_endpoints():
+def test_api_admin_endpoints(admin_headers):
     """Vérifie les points de terminaison REST /api/v1/admin."""
     # 1. Users list
-    resp_users = client.get("/api/v1/admin/users")
+    resp_users = client.get("/api/v1/admin/users", headers=admin_headers)
     assert resp_users.status_code == 200
     assert len(resp_users.json()) >= 1
 
     # 2. Audit logs
-    resp_audit = client.get("/api/v1/admin/audit-logs?limit=10")
+    resp_audit = client.get("/api/v1/admin/audit-logs?limit=10", headers=admin_headers)
     assert resp_audit.status_code == 200
     assert isinstance(resp_audit.json(), list)
 
     # 3. PRA Backups list
-    resp_backups = client.get("/api/v1/admin/pra/backups")
+    resp_backups = client.get("/api/v1/admin/pra/backups", headers=admin_headers)
     assert resp_backups.status_code == 200
     assert isinstance(resp_backups.json(), list)
 
     # 4. PRA Metrics
-    resp_metrics = client.get("/api/v1/admin/pra/metrics")
+    resp_metrics = client.get("/api/v1/admin/pra/metrics", headers=admin_headers)
     assert resp_metrics.status_code == 200
     assert "rto_cible_minutes" in resp_metrics.json()
     assert "rpo_cible_heures" in resp_metrics.json()

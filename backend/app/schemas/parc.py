@@ -60,8 +60,7 @@ class EquipementOut(EquipementBase):
 
 class SnmpScanRequest(BaseModel):
     """Requête de balayage réseau et détection d'équipements."""
-    plage_ip: str = "192.168.1.0/24"
-    simuler_rogue_device: bool = False
+    plage_ip: str
 
 
 class SnmpScanResponse(BaseModel):
@@ -70,6 +69,7 @@ class SnmpScanResponse(BaseModel):
     equipements_actifs: List[str]
     nouveaux_detectes: int
     rogue_device: Optional[Dict[str, Any]] = None
+    inconnus: List[Dict[str, Any]] = []
     horodatage: str
 
 

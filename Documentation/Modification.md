@@ -1,3 +1,5 @@
+> **Document historique** : feuille de route rédigée pendant la conception. Elle peut citer des fonctions prévues mais non réalisées ou une présentation orientée projet scolaire. L'état réel du produit est décrit dans [`DOSSIER_TECHNIQUE.md`](DOSSIER_TECHNIQUE.md).
+
 # Modifications de la Stack Technique — Cahier des Charges Sentinelle AIOps
 
 Ce document répertorie de manière exhaustive, section par section et page par page (en référence au document PDF original de 26 pages `Cahier_des_Charges_Sentinelle AIOps.pdf`), l'ensemble des ajustements à reporter pour aligner le cahier des charges avec les choix techniques validés :

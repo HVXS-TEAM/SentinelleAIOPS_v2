@@ -59,13 +59,6 @@ class AlerteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class DiskStressRequest(BaseModel):
-    """Paramètres d'injection de test de charge disque."""
-    equipement_id: int
-    target_disk_percent: float = Field(default=89.0, ge=50.0, le=99.0)
-    slope_boost: float = Field(default=2.5, ge=0.5, le=10.0)
-
-
 class ThresholdUpdateRequest(BaseModel):
     """Mise à jour du seuil critique d'alerte disque d'un équipement."""
     seuil_disque_alerte: float = Field(ge=50.0, le=99.0)

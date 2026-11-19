@@ -29,7 +29,40 @@ export interface RegisterData {
   email: string;
   nom_complet: string;
   mot_de_passe: string;
+  role?: string; // honoré uniquement depuis le poste qui héberge Sentinelle
+}
+
+export interface SetupStatus {
+  needs_setup: boolean;
+  allow_registration: boolean;
+  local_creation: boolean;
+  roles_disponibles: string[];
+  smtp_configure: boolean;
+}
+
+export interface SetupData {
+  identifiant: string;
+  email: string;
+  nom_complet: string;
+  mot_de_passe: string;
   role: string;
+}
+
+export interface ForgotPasswordResponse {
+  mode: 'email' | 'admin_code';
+  message: string;
+}
+
+export interface ResetCodeResponse {
+  identifiant: string;
+  code: string;
+  expire_dans_minutes: number;
+}
+
+export interface MfaSetupResponse {
+  secret: string;
+  otpauth_uri: string;
+  issuer: string;
 }
 
 export interface Equipement {

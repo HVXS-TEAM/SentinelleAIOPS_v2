@@ -1,7 +1,7 @@
 """Service de journalisation inaltérable d'audit (Audit Trail).
 
 Garantit la traçabilité intégrale de toutes les opérations sensibles :
-authentification, modification de seuils, application de scripts réseau, simulation.
+authentification, modification de seuils, application de scripts réseau.
 """
 from typing import Optional
 from sqlalchemy.orm import Session

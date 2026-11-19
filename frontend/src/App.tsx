@@ -1,17 +1,22 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { DashboardPage } from './pages/DashboardPage';
-import { SupervisionPage } from './pages/SupervisionPage';
-import { SecuritePage } from './pages/SecuritePage';
-import { NetDevOpsPage } from './pages/NetDevOpsPage';
-import { ParcPage } from './pages/ParcPage';
-import { AssistantPage } from './pages/AssistantPage';
-import { AdminPage } from './pages/AdminPage';
 import { LoginPage, type AuthenticatedUser } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { SetupPage } from './pages/SetupPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { authService, clearSession, SESSION_EXPIRED_EVENT, SESSION_KEYS } from './services/api';
+
+// Pages de l'application chargées à la demande : le bundle initial ne contient que la connexion et la coque.
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const SupervisionPage = lazy(() => import('./pages/SupervisionPage').then(m => ({ default: m.SupervisionPage })));
+const SecuritePage = lazy(() => import('./pages/SecuritePage').then(m => ({ default: m.SecuritePage })));
+const NetDevOpsPage = lazy(() => import('./pages/NetDevOpsPage').then(m => ({ default: m.NetDevOpsPage })));
+const ParcPage = lazy(() => import('./pages/ParcPage').then(m => ({ default: m.ParcPage })));
+const AssistantPage = lazy(() => import('./pages/AssistantPage').then(m => ({ default: m.AssistantPage })));
+const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
 
 function MainApp() {
   const { activeTheme } = useTheme();
@@ -25,8 +30,40 @@ function MainApp() {
     }
   });
 
-  const [authView, setAuthView] = useState<'login' | 'register'>('login');
+  const [authView, setAuthView] = useState<'checking' | 'setup' | 'login' | 'register' | 'forgot' | 'reset'>('checking');
+  const [allowRegistration, setAllowRegistration] = useState(false);
+  const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(['Visiteur']);
+  // Lien de réinitialisation reçu par e-mail : /?reset=<jeton>&u=<identifiant>
+  const [lienReset] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    return { code: p.get('reset') ?? '', identifiant: p.get('u') ?? '' };
+  });
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
+
+  // Base vide ? Le serveur l'indique : on propose alors la création du premier administrateur.
+  useEffect(() => {
+    if (currentUser) return;
+    setAuthView('checking');
+    let actif = true;
+    authService
+      .getSetupStatus()
+      .then(status => {
+        if (!actif) return;
+        setAllowRegistration(status.allow_registration || status.local_creation);
+        setRolesDisponibles(status.roles_disponibles?.length ? status.roles_disponibles : ['Visiteur']);
+        if (status.needs_setup) setAuthView('setup');
+        else setAuthView(lienReset.code ? 'reset' : 'login');
+      })
+      .catch(() => {
+        // Serveur injoignable : l'écran de connexion affiche l'erreur explicite.
+        if (actif) setAuthView('login');
+      });
+    return () => {
+      actif = false;
+    };
+    // Revérifié à chaque déconnexion : l'écran proposé (connexion, création de compte) vient du serveur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
   useEffect(() => {
     // Si l'utilisateur n'est pas connecté, réinitialiser l'onglet
@@ -66,18 +103,43 @@ function MainApp() {
 
   /* Si non authentifié, afficher l'écran de Login ou de Création de compte */
   if (!currentUser) {
-    if (authView === 'register') {
+    if (authView === 'checking') {
+      return <div className="h-screen w-screen bg-[#101416]" role="status" aria-label="Chargement" />;
+    }
+    if (authView === 'setup') {
+      return <SetupPage onSetupSuccess={handleLoginSuccess} />;
+    }
+    if (authView === 'register' && allowRegistration) {
       return (
         <RegisterPage
           onRegisterSuccess={handleLoginSuccess}
           onSwitchToLogin={() => setAuthView('login')}
+          rolesDisponibles={rolesDisponibles}
+        />
+      );
+    }
+    if (authView === 'forgot') {
+      return <ForgotPasswordPage onBackToLogin={() => setAuthView('login')} onHaveCode={() => setAuthView('reset')} />;
+    }
+    if (authView === 'reset') {
+      const retourConnexion = () => {
+        window.history.replaceState({}, '', window.location.pathname);
+        setAuthView('login');
+      };
+      return (
+        <ResetPasswordPage
+          identifiantInitial={lienReset.identifiant}
+          codeInitial={lienReset.code}
+          onDone={retourConnexion}
+          onBackToLogin={retourConnexion}
         />
       );
     }
     return (
       <LoginPage
         onLoginSuccess={handleLoginSuccess}
-        onSwitchToRegister={() => setAuthView('register')}
+        onSwitchToRegister={allowRegistration ? () => setAuthView('register') : undefined}
+        onForgotPassword={() => setAuthView('forgot')}
       />
     );
   }
@@ -113,7 +175,11 @@ function MainApp() {
         />
 
         <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {renderPage()}
+          <Suspense
+            fallback={<div className="p-6 text-xs font-mono text-[#87938e]" role="status">Chargement du module…</div>}
+          >
+            {renderPage()}
+          </Suspense>
         </main>
       </div>
     </div>

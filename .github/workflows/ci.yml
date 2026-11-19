@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Installer les dépendances
+        run: python -m pip install -r requirements-dev.txt
+      # Les tests utilisent un dossier temporaire (SENTINELLE_DATA_DIR, voir backend/tests/conftest.py).
+      - name: Lancer les tests
+        run: python -m pytest backend/tests -q
+      - name: Vérifier que les tests n'ont modifié aucun fichier du dépôt
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Les tests ont modifié ou créé des fichiers du dépôt :"
+            git status --porcelain
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend (tsc, lint, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Vérification des types
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Tests (vitest)
+        run: npm test
+      - name: Build de production
+        run: npm run build
+      - name: Aucun reste de mode démonstration dans le build de production
+        run: |
+          if grep -rliE "AdminPassword2026|TechPassword2026|VisiteurPassword2026|COMPTES DE DÉMONSTRATION|VITE_DEMO_MODE|simulate-stress|simulate-bruteforce|Emulation CLI|Mode Simulation" dist; then
+            echo "Des restes du mode démonstration sont embarqués dans le build de production" >&2
+            exit 1
+          fi
+

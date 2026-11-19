@@ -3,19 +3,29 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Union
 from jose import jwt
 import bcrypt
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 import base64
-from backend.app.core.config import settings
+from backend.app.core.config import settings, LEGACY_FERNET_KEY
 
-# Initialisation de la clé Fernet pour chiffrement réversible
-def _get_fernet() -> Fernet:
-    """Initialise l'instance Fernet à partir de la clé configurée."""
-    raw_key = settings.FERNET_KEY.encode()
+
+import logging
+logger = logging.getLogger("sentinelle.core.security")
+
+
+def _legacy_fernet() -> Fernet:
+    """Ancienne clé publique du dépôt : sert UNIQUEMENT à déchiffrer d'anciennes données."""
+    raw_key = LEGACY_FERNET_KEY.encode()
     try:
         return Fernet(raw_key)
-    except Exception:
-        padded = base64.urlsafe_b64encode(raw_key.ljust(32, b"0")[:32])
-        return Fernet(padded)
+    except Exception as exc:
+        logger.debug("_legacy_fernet : repli après erreur : %s", exc)
+        return Fernet(base64.urlsafe_b64encode(raw_key.ljust(32, b"0")[:32]))
+
+
+def _get_fernet() -> MultiFernet:
+    """Chiffre avec la clé active ; déchiffre avec la clé active puis l'ancienne clé (migration)."""
+    return MultiFernet([Fernet(settings.FERNET_KEY.encode()), _legacy_fernet()])
+
 
 fernet_cipher = _get_fernet()
 
@@ -26,7 +36,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         pwd_bytes = plain_password.encode("utf-8")[:72]
         hash_bytes = hashed_password.encode("utf-8")
         return bcrypt.checkpw(pwd_bytes, hash_bytes)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Vérification du mot de passe impossible (hachage invalide) : %s", exc)
         return False
 
 

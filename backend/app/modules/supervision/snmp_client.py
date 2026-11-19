@@ -293,7 +293,8 @@ class SnmpClient:
                 elif val_tag == TAG_OCTET_STRING:
                     try:
                         results[oid_str] = val_raw.decode("utf-8")
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("parse_get_response : repli après erreur : %s", exc)
                         results[oid_str] = val_raw.hex()
                 elif val_tag == TAG_OID:
                     results[oid_str] = ber_decode_oid(val_raw)
@@ -326,7 +327,8 @@ class SnmpClient:
             sock.sendto(req_packet, (ip, port))
             resp_data, _ = sock.recvfrom(4096)
             return cls.parse_get_response(resp_data)
-        except Exception:
+        except Exception as exc:
+            logger.debug("get : repli après erreur : %s", exc)
             return {}
         finally:
             sock.close()

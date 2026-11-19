@@ -8,9 +8,10 @@ interface Device {
   name: string;
   type: 'Router' | 'Switch' | 'Firewall';
   ip: string;
-  cisScore: number;
-  findings: number;
-  compliant: boolean;
+  /** null = configuration jamais collectée/auditée : aucune valeur n'est inventée. */
+  cisScore: number | null;
+  findings: number | null;
+  compliant: boolean | null;
 }
 
 interface CISFinding {
@@ -19,61 +20,35 @@ interface CISFinding {
   description: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
   currentConfigSnippet: string;
+  /** Commandes IOS exactes applicables telles quelles ; vide si la correction exige un paramètre du site. */
   suggestedConfigSnippet: string;
+  /** Texte de correction manuelle fourni par la règle CIS. */
+  manualRemediation: string;
 }
 
 interface Backup {
   id: string;
+  index: number;
   date: string;
   hash: string;
 }
 
-/* ── Données conformes à screen.png (Données initiales de secours) ───────── */
-const DEVICES: Device[] = [
-  { id: 'SW-CORE-01', name: 'SW-CORE-01', type: 'Switch', ip: '10.0.1.10', cisScore: 65, findings: 5, compliant: false },
-  { id: 'RTR-EDGE-01', name: 'RTR-EDGE-01', type: 'Router', ip: '10.0.1.1', cisScore: 82, findings: 2, compliant: false },
-  { id: 'FW-PERIMETER-01', name: 'FW-PERIMETER-01', type: 'Firewall', ip: '192.168.1.254', cisScore: 100, findings: 0, compliant: true },
-  { id: 'AP-WIFI-01', name: 'AP-WIFI-01', type: 'Switch', ip: '10.0.20.1', cisScore: 40, findings: 6, compliant: false },
-];
-
-const FINDINGS_DIST_SW: CISFinding[] = [
-  {
-    id: 'f1',
-    title: 'Plaintext password detected',
-    description: "CIS 1.1.1 Ensure 'service password-encryption' is enabled",
-    severity: 'CRITICAL',
-    currentConfigSnippet: `line vty 0 4\n login\n password cisco\n!\nsnmp-server community public RO\nsnmp-server community private RW`,
-    suggestedConfigSnippet: `service password-encryption\nline vty 0 4\n login local\n transport input ssh\n exec-timeout 5 0\n!\nno snmp-server community public\nno snmp-server community private\nsnmp-server group SECGROUP v3 priv`,
-  },
-  {
-    id: 'f2',
-    title: 'SNMP v1 active',
-    description: 'CIS 4.2.1 Disable SNMPv1/v2c',
-    severity: 'HIGH',
-    currentConfigSnippet: `snmp-server community public RO\nsnmp-server community private RW\nsnmp-server enable traps`,
-    suggestedConfigSnippet: `no snmp-server community public\nno snmp-server community private\nsnmp-server user admin SECGROUP v3 auth sha StrongPass123! priv aes 128 StrongKey456!`,
-  },
-  {
-    id: 'f3',
-    title: 'Default VLAN active',
-    description: 'CIS 2.1.2 Ensure default VLAN is disabled',
-    severity: 'MEDIUM',
-    currentConfigSnippet: `interface FastEthernet0/12\n switchport mode access\n switchport access vlan 1`,
-    suggestedConfigSnippet: `interface FastEthernet0/12\n switchport mode access\n switchport access vlan 100\n shutdown`,
-  },
-];
-
-const BACKUPS: Backup[] = [
-  { id: 'b1', date: "Aujourd'hui 02:00", hash: '8f9a2b1c' },
-  { id: 'b2', date: 'Hier 02:00', hash: '3c1d4e5f' },
-];
+const errorDetail = (err: any, fallback: string): string => {
+  const d = err?.response?.data?.detail;
+  return typeof d === 'string' && d ? d : fallback;
+};
 
 export const NetDevOpsPage: React.FC = () => {
-  const [devicesList, setDevicesList] = useState<Device[]>(DEVICES);
-  const [selectedDevice, setSelectedDevice] = useState<Device>(DEVICES[0]);
-  const [findingsList, setFindingsList] = useState<CISFinding[]>(FINDINGS_DIST_SW);
-  const [selectedFinding, setSelectedFinding] = useState<CISFinding>(FINDINGS_DIST_SW[0]);
-  const [backupsList, setBackupsList] = useState<Backup[]>(BACKUPS);
+  const [devicesList, setDevicesList] = useState<Device[]>([]);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [findingsList, setFindingsList] = useState<CISFinding[]>([]);
+  const [customFinding, setCustomFinding] = useState<CISFinding | null>(null);
+  const [selectedFinding, setSelectedFinding] = useState<CISFinding | null>(null);
+  const [backupsList, setBackupsList] = useState<Backup[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [auditSource, setAuditSource] = useState<string | null>(null);
 
   const [showApplyDrawer, setShowApplyDrawer] = useState(false);
   const [showRestoreDrawer, setShowRestoreDrawer] = useState(false);
@@ -84,150 +59,165 @@ export const NetDevOpsPage: React.FC = () => {
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    setTimeout(() => setToastMsg(null), 3500);
   };
 
   const [findingSearchQuery, setFindingSearchQuery] = useState('');
 
-  /* Détection et injection automatique d'un script transféré depuis l'Assistant IA */
+  /* Script transféré depuis l'Assistant IA : devient une correction personnalisée à relire avant application */
   useEffect(() => {
     const prefillCode = sessionStorage.getItem('netdevops:prefill_code');
     if (prefillCode) {
       sessionStorage.removeItem('netdevops:prefill_code');
-      setSelectedFinding(prev => ({
-        ...prev,
+      const custom: CISFinding = {
+        id: 'custom',
+        title: 'Script correctif personnalisé (transféré depuis l\'Assistant)',
+        description: 'Commandes proposées par l\'Assistant : à relire avant toute application sur l\'équipement.',
+        severity: 'MEDIUM',
+        currentConfigSnippet: '',
         suggestedConfigSnippet: prefillCode,
-        title: 'Script Correctif Personnalisé (Transféré depuis Assistant IA)',
-        description: 'Commandes générées par Sentinelle Neural Core validées pour déploiement Netmiko.',
-      }));
+        manualRemediation: '',
+      };
+      setCustomFinding(custom);
+      setSelectedFinding(custom);
       setShowApplyDrawer(true);
-      showToast('Script Cisco IOS chargé avec succès depuis l\'Assistant IA.');
+      showToast('Script chargé depuis l\'Assistant. Relisez-le avant de l\'appliquer.');
     }
   }, []);
 
-  const filteredFindings = findingsList.filter(f => {
+  const allFindings = customFinding ? [customFinding, ...findingsList] : findingsList;
+  const filteredFindings = allFindings.filter(f => {
     if (!findingSearchQuery.trim()) return true;
     const q = findingSearchQuery.toLowerCase();
     return f.title.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
   });
 
-  const loadDeviceAudit = useCallback(async (devId: string) => {
+  const loadBackups = useCallback(async (devId: string) => {
     try {
-      const [auditRes, backupsRes] = await Promise.all([
-        netdevopsService.runAudit(devId),
-        netdevopsService.getBackups(devId).catch(() => []),
-      ]);
-
-      if (auditRes) {
-        if (auditRes.violations && auditRes.violations.length > 0) {
-          const mappedFindings: CISFinding[] = auditRes.violations.map((v: any, idx: number) => ({
-            id: v.id || `f-${idx}`,
-            title: v.title || v.rule_id || 'Écart de conformité CIS',
-            description: v.description || v.rationale || 'Règle de durcissement CIS Benchmark',
-            severity: (v.severity === 'CRITICAL' ? 'CRITICAL' : v.severity === 'HIGH' ? 'HIGH' : 'MEDIUM') as 'CRITICAL' | 'HIGH' | 'MEDIUM',
-            currentConfigSnippet: v.snippet || '! Configuration vulnérable détectée\nno service password-encryption\nline vty 0 4\n transport input telnet',
-            suggestedConfigSnippet: v.remediation || 'service password-encryption\nline vty 0 4\n transport input ssh\n exec-timeout 10 0',
-          }));
-          setFindingsList(mappedFindings);
-          setSelectedFinding(prev =>
-            prev.title.includes('Assistant IA') ? prev : mappedFindings[0]
-          );
-        } else {
-          setFindingsList([]);
-        }
-
-        // Mettre à jour le score dans la liste des équipements
-        setDevicesList(prev => prev.map(d => d.id === devId ? {
-          ...d,
-          cisScore: Math.round(auditRes.score ?? d.cisScore),
-          findings: auditRes.violations?.length ?? 0,
-          compliant: auditRes.compliant ?? (auditRes.violations?.length === 0),
-        } : d));
-      }
-
-      if (backupsRes && Array.isArray(backupsRes) && backupsRes.length > 0) {
-        const mappedBackups: Backup[] = backupsRes.map((b: any, idx: number) => ({
-          id: `b-${idx}`,
-          date: b.ts ? new Date(b.ts).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : `Backup #${idx + 1}`,
-          hash: b.sha256 ? `${b.sha256.slice(0, 8)}...` : '8f9a2b...',
-        }));
-        setBackupsList(mappedBackups);
-      }
+      const backupsRes = await netdevopsService.getBackups(devId);
+      setBackupsList(
+        (Array.isArray(backupsRes) ? backupsRes : []).map((b: any, idx: number) => ({
+          id: `b-${b.index ?? idx}`,
+          index: typeof b.index === 'number' ? b.index : idx,
+          date: b.ts ? new Date(b.ts).toLocaleString('fr-FR') : `Sauvegarde #${idx + 1}`,
+          hash: b.sha256 ?? '',
+        })),
+      );
     } catch {
-      // Tolérance mode hors-ligne
+      setBackupsList([]);
     }
   }, []);
 
+  /** Lance l'audit réel d'un équipement ; renvoie true si le rapport a pu être produit. */
+  const loadDeviceAudit = useCallback(async (devId: string): Promise<boolean> => {
+    setAuditError(null);
+    try {
+      const auditRes = await netdevopsService.runAudit(devId);
+      const violations: any[] = Array.isArray(auditRes?.violations) ? auditRes.violations : [];
+      const mappedFindings: CISFinding[] = violations.map((v: any, idx: number) => ({
+        id: v.id || `f-${idx}`,
+        title: v.title || v.id || 'Écart de conformité CIS',
+        description: v.description || 'Règle de durcissement CIS Benchmark',
+        severity: (v.severity === 'CRITICAL' ? 'CRITICAL' : v.severity === 'HIGH' ? 'HIGH' : 'MEDIUM') as 'CRITICAL' | 'HIGH' | 'MEDIUM',
+        currentConfigSnippet: v.snippet || '',
+        suggestedConfigSnippet: v.remediation_commands || '',
+        manualRemediation: v.remediation || '',
+      }));
+      setFindingsList(mappedFindings);
+      setSelectedFinding(prev => (prev?.id === 'custom' ? prev : mappedFindings[0] ?? null));
+      setAuditSource(typeof auditRes?.config_source === 'string' ? auditRes.config_source : null);
+      setDevicesList(prev => prev.map(d => d.id === devId ? {
+        ...d,
+        cisScore: typeof auditRes?.score === 'number' ? Math.round(auditRes.score) : d.cisScore,
+        findings: violations.length,
+        compliant: violations.length === 0,
+      } : d));
+      void loadBackups(devId);
+      return true;
+    } catch (err: any) {
+      setFindingsList([]);
+      setSelectedFinding(prev => (prev?.id === 'custom' ? prev : null));
+      setAuditSource(null);
+      setAuditError(errorDetail(err, 'Audit impossible : le serveur n\'a pas pu obtenir la configuration de l\'équipement.'));
+      void loadBackups(devId);
+      return false;
+    }
+  }, [loadBackups]);
+
   useEffect(() => {
     netdevopsService.getDevices().then(devs => {
-      if (devs && Array.isArray(devs) && devs.length > 0) {
-        const mapped: Device[] = devs.map((d: any) => ({
-          id: d.id,
-          name: d.name || d.id,
-          type: (d.type === 'switch' ? 'Switch' : d.type === 'router' ? 'Router' : 'Firewall') as 'Router' | 'Switch' | 'Firewall',
-          ip: d.ip || (d.id === 'SW-CORE-01' ? '192.168.1.254' : d.id === 'RTR-EDGE-01' ? '192.168.1.1' : '10.0.1.10'),
-          cisScore: typeof d.cis_score === 'number' ? Math.round(d.cis_score) : 75,
-          findings: typeof d.findings === 'number' ? d.findings : 2,
-          compliant: Boolean(d.compliant),
-        }));
-        setDevicesList(mapped);
+      const list: any[] = Array.isArray(devs) ? devs : [];
+      const mapped: Device[] = list.map((d: any) => ({
+        id: d.id,
+        name: d.name || d.id,
+        type: (d.type === 'switch' ? 'Switch' : d.type === 'router' ? 'Router' : 'Firewall') as 'Router' | 'Switch' | 'Firewall',
+        ip: d.ip || '',
+        cisScore: typeof d.cis_score === 'number' ? Math.round(d.cis_score) : null,
+        findings: typeof d.findings === 'number' ? d.findings : null,
+        compliant: typeof d.findings === 'number' ? d.findings === 0 : null,
+      }));
+      setDevicesList(mapped);
+      setDevicesError(null);
+      if (mapped.length > 0) {
         setSelectedDevice(mapped[0]);
-        loadDeviceAudit(mapped[0].id);
+        void loadDeviceAudit(mapped[0].id);
       }
-    }).catch(() => {});
+    }).catch((err: any) => {
+      setDevicesError(errorDetail(err, 'Impossible de charger la liste des équipements.'));
+    }).finally(() => setDevicesLoaded(true));
   }, [loadDeviceAudit]);
 
   const handleDeviceChange = (dev: Device) => {
     setSelectedDevice(dev);
-    loadDeviceAudit(dev.id);
-    showToast(`Équipement sélectionné : ${dev.name}`);
+    setFindingsList([]);
+    setBackupsList([]);
+    setAuditSource(null);
+    void loadDeviceAudit(dev.id);
   };
 
   const handleRunAudit = async () => {
+    if (!selectedDevice) return;
     setIsAuditing(true);
-    showToast(`Audit CIS en cours d'exécution sur ${selectedDevice.name}...`);
-    try {
-      await loadDeviceAudit(selectedDevice.id);
-      showToast(`Audit CIS terminé pour ${selectedDevice.name} avec sauvegarde SHA-256.`);
-    } catch {
-      showToast(`Audit CIS terminé : Score actuel = ${selectedDevice.cisScore}%.`);
-    } finally {
-      setIsAuditing(false);
-    }
+    showToast(`Audit CIS en cours sur ${selectedDevice.name}...`);
+    const ok = await loadDeviceAudit(selectedDevice.id);
+    showToast(ok ? `Audit CIS terminé pour ${selectedDevice.name}.` : `Audit CIS impossible pour ${selectedDevice.name}.`);
+    setIsAuditing(false);
   };
 
   const handleApplySSH = async () => {
+    if (!selectedDevice || !selectedFinding || !selectedFinding.suggestedConfigSnippet) return;
     setIsApplyingSSH(true);
     try {
       const res = await netdevopsService.remediate(
         selectedDevice.id,
         selectedFinding.suggestedConfigSnippet,
-        selectedFinding.id,
+        selectedFinding.id === 'custom' ? undefined : selectedFinding.id,
       );
       await loadDeviceAudit(selectedDevice.id);
       setShowApplyDrawer(false);
+      const score = res?.audit?.score;
       showToast(
-        res?.message ||
-          `Remédiation appliquée sur ${selectedDevice.name} (Score CIS : ${res?.new_score ?? 100}%).`,
+        typeof score === 'number'
+          ? `Correctif appliqué sur ${selectedDevice.name} (SSH). Score CIS relu : ${Math.round(score)} %.`
+          : `Correctif appliqué sur ${selectedDevice.name} (SSH).`,
       );
-    } catch {
-      showToast(`Erreur lors de l'application du correctif sur ${selectedDevice.name}.`);
+    } catch (err: any) {
+      showToast(errorDetail(err, `Le correctif n'a pas pu être appliqué sur ${selectedDevice.name} ; rien n'a été modifié.`));
     } finally {
       setIsApplyingSSH(false);
     }
   };
 
   const handleRestoreBackup = async () => {
-    if (!selectedBackup) return;
-    const idx = parseInt(selectedBackup.id.replace('b-', ''), 10) || 0;
+    if (!selectedBackup || !selectedDevice) return;
     try {
-      const res = await netdevopsService.restoreBackup(selectedDevice.id, idx);
+      const res = await netdevopsService.restoreBackup(selectedDevice.id, selectedBackup.index);
       await loadDeviceAudit(selectedDevice.id);
       setShowRestoreDrawer(false);
-      showToast(res?.message || `Configuration restaurée avec succès sur ${selectedDevice.name}.`);
-    } catch {
+      showToast(res?.note || `Configuration de référence réactivée dans Sentinelle pour ${selectedDevice.name}.`);
+    } catch (err: any) {
       setShowRestoreDrawer(false);
-      showToast(`Erreur lors de la restauration de la sauvegarde.`);
+      showToast(errorDetail(err, 'Erreur lors de la restauration de la sauvegarde.'));
     }
   };
 
@@ -248,7 +238,7 @@ export const NetDevOpsPage: React.FC = () => {
           NetDevOps Automation
         </h1>
         <p className="text-sm text-[#87938e] mt-0.5">
-          Audit de conformité CIS &amp; Suggestions d'automatisation IA
+          Audit de conformité CIS &amp; remédiation SSH
         </p>
       </div>
 
@@ -263,13 +253,23 @@ export const NetDevOpsPage: React.FC = () => {
                 Équipements Réseau
               </h2>
               <span className="text-[11px] font-mono text-[#87938e] px-2 py-0.5 rounded bg-[#161c22] border border-[#272a2d]">
-                {devicesList.length} total
+                {devicesList.length} au total
               </span>
             </div>
 
             <div className="space-y-3">
+              {devicesError && (
+                <div className="p-3 text-xs text-[#ffb4ab] bg-[#161c22] rounded-lg border border-[#272a2d] font-sans" data-testid="netdevops-devices-error">
+                  {devicesError}
+                </div>
+              )}
+              {devicesLoaded && !devicesError && devicesList.length === 0 && (
+                <div className="p-4 text-center text-xs text-[#87938e] bg-[#161c22] rounded-lg border border-[#272a2d] font-sans" data-testid="netdevops-no-devices">
+                  Aucun équipement dans le parc. Ajoutez-en depuis la page Parc.
+                </div>
+              )}
               {devicesList.map(d => {
-                const isSelected = selectedDevice.id === d.id;
+                const isSelected = selectedDevice?.id === d.id;
                 return (
                   <div
                     key={d.id}
@@ -297,10 +297,10 @@ export const NetDevOpsPage: React.FC = () => {
                         <div className="flex items-center gap-1.5 mt-1 text-[11px] font-mono">
                           <span
                             className="w-2 h-2 rounded-full inline-block"
-                            style={{ backgroundColor: d.compliant ? '#78d8ba' : '#ffb4ab' }}
+                            style={{ backgroundColor: d.compliant === null ? '#87938e' : d.compliant ? '#78d8ba' : '#ffb4ab' }}
                           />
                           <span className="text-[#87938e]">
-                            {d.compliant ? 'Compliant' : `${d.findings} findings`}
+                            {d.compliant === null ? 'Non audité' : d.compliant ? 'Conforme' : `${d.findings} écart(s)`}
                           </span>
                         </div>
                       </div>
@@ -309,14 +309,16 @@ export const NetDevOpsPage: React.FC = () => {
                     {/* Badge Score CIS */}
                     <div
                       className={`px-3 py-1.5 rounded-lg border text-center font-mono ${
-                        d.cisScore >= 90
+                        d.cisScore === null
+                          ? 'border-[#3e4945] bg-[#161c22] text-[#87938e]'
+                          : d.cisScore >= 90
                           ? 'border-[#78d8ba]/40 bg-[#78d8ba]/10 text-[#78d8ba]'
                           : d.cisScore >= 75
                           ? 'border-orange-500/40 bg-orange-500/10 text-orange-400'
                           : 'border-[#ffb4ab]/40 bg-[#ffb4ab]/10 text-[#ffb4ab]'
                       }`}
                     >
-                      <div className="text-sm font-bold leading-none">{d.cisScore}%</div>
+                      <div className="text-sm font-bold leading-none">{d.cisScore === null ? 'N/A' : `${d.cisScore}%`}</div>
                       <div className="text-[9px] uppercase tracking-wider mt-0.5 opacity-80">CIS SCORE</div>
                     </div>
                   </div>
@@ -333,6 +335,11 @@ export const NetDevOpsPage: React.FC = () => {
             </div>
 
             <div className="space-y-3 font-mono text-xs">
+              {backupsList.length === 0 && (
+                <div className="p-3 text-center text-[11px] text-[#87938e] font-sans" data-testid="netdevops-no-backups">
+                  Aucune sauvegarde pour cet équipement.
+                </div>
+              )}
               {backupsList.map(b => (
                 <div
                   key={b.id}
@@ -344,7 +351,7 @@ export const NetDevOpsPage: React.FC = () => {
                       <span className="font-semibold text-[#e0e3e6]">{b.date}</span>
                     </div>
                     <div className="text-[11px] text-[#87938e] mt-1 pl-4">
-                      Hash: {b.hash}
+                      SHA-256 : {b.hash ? `${b.hash.slice(0, 12)}…` : 'indisponible'}
                     </div>
                   </div>
                   <button
@@ -355,7 +362,7 @@ export const NetDevOpsPage: React.FC = () => {
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1d2022] border border-[#3e4945] hover:border-[#78d8ba] text-[#78d8ba] text-xs transition-colors"
                   >
                     <Icon name="restore" size="xs" />
-                    Restore
+                    Restaurer
                   </button>
                 </div>
               ))}
@@ -365,6 +372,12 @@ export const NetDevOpsPage: React.FC = () => {
 
         {/* ── Colonne Droite (8 cols) : Détail de l'audit & Diff IA ─────────── */}
         <div className="lg:col-span-8 bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-6 flex flex-col justify-between">
+          {!selectedDevice ? (
+            <div className="text-sm text-[#87938e] text-center py-16" data-testid="netdevops-no-selection">
+              Sélectionnez un équipement pour lancer ou consulter son audit CIS.
+            </div>
+          ) : (
+          <>
           <div>
             {/* En-tête du détail */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-5 border-b border-[#272a2d] gap-3">
@@ -375,7 +388,7 @@ export const NetDevOpsPage: React.FC = () => {
                   <span className="text-[#e0e3e6]">Détail de l'audit</span>
                 </div>
                 <div className="text-xs font-mono text-[#87938e] mt-1">
-                  CIS Cisco IOS 15 Benchmark v4.0.0
+                  CIS Cisco IOS 15 Benchmark v4.0.0{auditSource ? ` — configuration : ${auditSource}` : ''}
                 </div>
               </div>
 
@@ -390,15 +403,19 @@ export const NetDevOpsPage: React.FC = () => {
                   <span>{isAuditing ? 'Audit en cours...' : 'Lancer Audit CIS'}</span>
                 </button>
 
-                {selectedDevice.compliant ? (
+                {selectedDevice.compliant === null && findingsList.length === 0 ? (
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#161c22] border border-[#3e4945] text-xs font-mono font-bold text-[#87938e]">
+                    Non audité
+                  </div>
+                ) : selectedDevice.compliant ? (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#78d8ba]/15 border border-[#78d8ba]/40 text-xs font-mono font-bold text-[#78d8ba]">
                     <Icon name="check_circle" size="sm" />
-                    100% Compliant
+                    Conforme
                   </div>
                 ) : (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#ffb4ab]/15 border border-[#ffb4ab]/40 text-xs font-mono font-bold text-[#ffb4ab]">
                     <Icon name="warning" size="sm" />
-                    {findingsList.length} Findings
+                    {findingsList.length} écart(s)
                   </div>
                 )}
               </div>
@@ -423,13 +440,17 @@ export const NetDevOpsPage: React.FC = () => {
                 </div>
 
                 {/* Liste filtrée des anomalies */}
-                {filteredFindings.length === 0 ? (
+                {auditError ? (
+                  <div className="p-4 text-xs text-[#ffb4ab] font-sans bg-[#161c22] rounded-lg border border-[#272a2d]" data-testid="netdevops-audit-error">
+                    {auditError}
+                  </div>
+                ) : filteredFindings.length === 0 ? (
                   <div className="p-6 text-center text-xs text-[#87938e] font-sans bg-[#161c22] rounded-lg border border-[#272a2d]">
-                    Aucune anomalie ne correspond à votre filtre.
+                    {allFindings.length === 0 ? 'Aucun écart CIS relevé sur la dernière configuration.' : 'Aucune anomalie ne correspond à votre filtre.'}
                   </div>
                 ) : (
                   filteredFindings.map(f => {
-                    const isSel = selectedFinding.id === f.id;
+                    const isSel = selectedFinding?.id === f.id;
                     return (
                       <div
                         key={f.id}
@@ -462,7 +483,7 @@ export const NetDevOpsPage: React.FC = () => {
                 <div>
                   <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-3">
                     <Icon name="memory" size="sm" className="text-[#78d8ba]" />
-                    Suggestions d'automatisation IA
+                    Correction proposée
                   </div>
 
                   {/* Tableau Comparatif Diff Cisco IOS */}
@@ -470,21 +491,26 @@ export const NetDevOpsPage: React.FC = () => {
                     {/* Colonne Gauche : Current Config */}
                     <div className="border-r border-[#272a2d] p-3 flex flex-col">
                       <div className="text-[10px] text-[#87938e] uppercase font-bold pb-2 border-b border-[#272a2d] mb-2">
-                        Current Config (Running)
+                        Extrait de la configuration
                       </div>
                       <pre className="text-[#e0e3e6] overflow-x-auto leading-relaxed opacity-80 whitespace-pre font-mono">
-                        {selectedFinding.currentConfigSnippet}
+                        {selectedFinding?.currentConfigSnippet || '(aucun extrait : directive absente ou non applicable)'}
                       </pre>
                     </div>
 
                     {/* Colonne Droite : AI Suggested Correction */}
                     <div className="p-3 bg-[#15231f]/40 flex flex-col">
                       <div className="text-[10px] text-[#78d8ba] uppercase font-bold pb-2 border-b border-[#272a2d] mb-2">
-                        AI Suggested Correction
+                        Commandes à appliquer
                       </div>
                       <pre className="text-[#78d8ba] overflow-x-auto leading-relaxed whitespace-pre font-mono font-semibold">
-                        {selectedFinding.suggestedConfigSnippet}
+                        {selectedFinding?.suggestedConfigSnippet || '(aucune commande automatique : correction manuelle)'}
                       </pre>
+                      {selectedFinding && !selectedFinding.suggestedConfigSnippet && selectedFinding.manualRemediation && (
+                        <p className="mt-3 text-[11px] text-[#bdc9c3] font-sans leading-relaxed" data-testid="netdevops-manual-remediation">
+                          Correction manuelle : {selectedFinding.manualRemediation}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -495,27 +521,23 @@ export const NetDevOpsPage: React.FC = () => {
           {/* Boutons d'action en bas à droite (Fidèles à screen.png) */}
           <div className="pt-6 border-t border-[#272a2d] flex items-center justify-end gap-3 mt-6">
             <button
-              id="netdevops-reject-btn"
-              onClick={() => showToast('Suggestion IA rejetée. Journalisé dans l\'audit trail.')}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#3e4945] bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#e0e3e6] transition-colors"
-            >
-              <Icon name="close" size="sm" />
-              Reject
-            </button>
-            <button
               id="netdevops-approve-btn"
               onClick={() => setShowApplyDrawer(true)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm"
+              disabled={!selectedFinding || !selectedFinding.suggestedConfigSnippet}
+              title={selectedFinding && !selectedFinding.suggestedConfigSnippet ? 'Cette règle exige une correction manuelle' : undefined}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#78d8ba] hover:bg-[#68c8aa] text-[#00382b] font-mono font-bold text-xs transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Icon name="check_circle" size="sm" />
-              Approve &amp; Apply
+              Appliquer
             </button>
           </div>
+          </>
+          )}
         </div>
       </div>
 
-      {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Déploiement Netmiko SSH ── */}
-      {showApplyDrawer && (
+      {/* ── Tiroir : déploiement SSH ── */}
+      {showApplyDrawer && selectedDevice && selectedFinding && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-lg bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
             <div>
@@ -523,7 +545,7 @@ export const NetDevOpsPage: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Icon name="terminal" size="md" className="text-[#78d8ba]" />
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
-                    Déploiement Netmiko (Cisco IOS)
+                    Déploiement SSH (Cisco IOS)
                   </h3>
                 </div>
                 <button
@@ -547,7 +569,7 @@ export const NetDevOpsPage: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[#87938e]">Pilote d'automatisation :</span>
-                    <span className="text-[#bdc9c3]">cisco_ios (Netmiko Python)</span>
+                    <span className="text-[#bdc9c3]">SSH interactif (Paramiko)</span>
                   </div>
                 </div>
 
@@ -563,7 +585,7 @@ write memory`}
                     id="netdevops-copy-cli-btn"
                     onClick={() => {
                       navigator.clipboard.writeText(`configure terminal\n${selectedFinding.suggestedConfigSnippet}\nend\nwrite memory`);
-                      showToast('Script de remédiation Cisco IOS copié dans le presse-papier !');
+                      showToast('Commandes copiées dans le presse-papiers.');
                     }}
                     className="w-full py-2 rounded-lg border border-[#3e4945] hover:border-[#78d8ba] text-xs font-mono text-[#dfe4e0] hover:text-[#78d8ba] flex items-center justify-center gap-1.5 transition-colors cursor-pointer mt-2"
                   >
@@ -573,7 +595,7 @@ write memory`}
                 </div>
 
                 <div className="p-3 bg-[#1d2022] rounded-lg border border-[#272a2d] text-[#bdc9c3] text-[11px]">
-                  Un backup automatique de la running-config sera généré avant l'application pour garantir le rollback immédiat en cas d'erreur.
+                  Les commandes sont envoyées par SSH, puis la configuration en place est relue et sauvegardée (SHA-256). Si la connexion ou une commande échoue, rien n'est enregistré.
                 </div>
               </div>
             </div>
@@ -585,7 +607,7 @@ write memory`}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#78d8ba] text-[#00382b] font-mono font-bold text-xs hover:bg-[#68c8aa] transition-colors disabled:opacity-50"
               >
                 {isApplyingSSH ? (
-                  <>Exécution Netmiko en cours...</>
+                  <>Exécution SSH en cours...</>
                 ) : (
                   <>
                     <Icon name="check_circle" size="sm" />
@@ -605,7 +627,7 @@ write memory`}
       )}
 
       {/* ── TIROIR LATÉRAL GESTION DE FENÊTRES V1 : Restauration de Sauvegarde ── */}
-      {showRestoreDrawer && selectedBackup && (
+      {showRestoreDrawer && selectedBackup && selectedDevice && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-[#161c22] border-l border-[#3e4945] h-full p-6 shadow-2xl flex flex-col justify-between overflow-y-auto">
             <div>
@@ -613,7 +635,7 @@ write memory`}
                 <div className="flex items-center gap-2">
                   <Icon name="restore" size="md" className="text-orange-400" />
                   <h3 className="font-bold font-mono text-base text-[#e0e3e6]">
-                    Restauration Sauvegarde
+                    Restaurer une sauvegarde
                   </h3>
                 </div>
                 <button
@@ -626,17 +648,13 @@ write memory`}
 
               <div className="mt-5 space-y-4 font-mono text-xs">
                 <p className="text-xs text-[#bdc9c3]">
-                  Vous êtes sur le point de restaurer la configuration de <span className="text-[#78d8ba] font-bold">{selectedDevice.name}</span> à partir de l'instantané du <span className="text-[#e0e3e6] font-bold">{selectedBackup.date}</span>.
+                  Vous êtes sur le point de restaurer la configuration de <span className="text-[#78d8ba] font-bold">{selectedDevice.name}</span> à partir de l'instantané du <span className="text-[#e0e3e6] font-bold">{selectedBackup.date}</span>. La configuration est réactivée comme référence dans Sentinelle ; elle n'est pas poussée automatiquement sur l'équipement.
                 </p>
 
                 <div className="p-3 bg-[#1d2022] rounded-lg border border-[#272a2d] space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-[#87938e]">Snapshot Hash:</span>
-                    <span className="text-[#78d8ba]">{selectedBackup.hash}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#87938e]">Validation Checksum:</span>
-                    <span className="text-emerald-400 font-bold">SHA-256 Valide ✓</span>
+                    <span className="text-[#87938e]">SHA-256 :</span>
+                    <span className="text-[#78d8ba] break-all">{selectedBackup.hash || 'indisponible'}</span>
                   </div>
                 </div>
               </div>
@@ -647,7 +665,7 @@ write memory`}
                 onClick={handleRestoreBackup}
                 className="flex-1 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-mono font-bold text-xs transition-colors"
               >
-                Confirmer le Rollback
+                Confirmer la restauration
               </button>
               <button
                 onClick={() => setShowRestoreDrawer(false)}

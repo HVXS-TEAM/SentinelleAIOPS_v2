@@ -10,7 +10,6 @@ from backend.app.schemas.supervision import (
     MetricSeriesResponse,
     PredictionOut,
     AlerteOut,
-    DiskStressRequest,
     ThresholdUpdateRequest,
 )
 from backend.app.modules.supervision.service import SupervisionService
@@ -195,27 +194,6 @@ def recalculate_ttf(
     item = PredictionOut.model_validate(pred)
     item.equipement_nom = pred.equipement.nom if pred.equipement else ""
     return item
-
-
-@router.post("/simulate-stress", response_model=PredictionOut, summary="Test de charge disque & Alerte TTF")
-def simulate_disk_stress_endpoint(
-    req: DiskStressRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
-):
-    """Injecte une accélération de la consommation disque et recalcule immédiatement le TTF."""
-    try:
-        pred = SupervisionService.simulate_disk_stress(
-            db,
-            equipement_id=req.equipement_id,
-            target_disk_percent=req.target_disk_percent,
-            slope_boost=req.slope_boost,
-        )
-        item = PredictionOut.model_validate(pred)
-        item.equipement_nom = pred.equipement.nom if pred.equipement else ""
-        return item
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.put("/threshold/{equipement_id}", summary="Configuration du seuil d'alerte")

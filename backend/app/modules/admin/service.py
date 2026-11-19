@@ -34,6 +34,10 @@ from backend.app.db.models import (
     User,
 )
 
+import logging
+logger = logging.getLogger("sentinelle.admin.service")
+
+
 BASE_DIR = DATA_DIR
 DB_PATH = DB_FILE_PATH
 BACKUP_DIR = CFG_BACKUP_DIR
@@ -76,6 +80,10 @@ def _calculate_sha256(filepath: Path) -> str:
         while chunk := f.read(8192):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _count_active_admins(db: Session) -> int:
+    return db.query(User).filter(User.role == "Administrateur", User.est_actif.is_(True)).count()
 
 
 class AdminService:
@@ -167,6 +175,11 @@ class AdminService:
         if not user:
             raise ValueError(f"Utilisateur #{user_id} introuvable.")
 
+        if user.est_actif and user.identifiant == current_admin_user:
+            raise PermissionError("Vous ne pouvez pas désactiver votre propre compte.")
+        if user.est_actif and user.role == "Administrateur" and _count_active_admins(db) <= 1:
+            raise PermissionError("Impossible de désactiver le dernier administrateur actif.")
+
         user.est_actif = not user.est_actif
         db.commit()
 
@@ -181,6 +194,34 @@ class AdminService:
         )
 
         return {"id": user.id, "identifiant": user.identifiant, "est_actif": user.est_actif}
+
+    @staticmethod
+    def update_user_role(db: Session, user_id: int, role: str, current_admin_user: str) -> dict[str, Any]:
+        """
+        Rôle : Change le rôle RBAC d'un compte (tracé dans le journal d'audit).
+        Cas d'erreur : ValueError si introuvable ; PermissionError si l'on modifie son propre rôle
+        ou si l'on retire le dernier administrateur actif.
+        """
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError(f"Utilisateur #{user_id} introuvable.")
+        if user.identifiant == current_admin_user:
+            raise PermissionError("Vous ne pouvez pas modifier votre propre rôle.")
+        if user.role == "Administrateur" and role != "Administrateur" and user.est_actif and _count_active_admins(db) <= 1:
+            raise PermissionError("Impossible de retirer le rôle du dernier administrateur actif.")
+
+        ancien = user.role
+        user.role = role
+        db.commit()
+        _record_audit(
+            db,
+            user_id=user.id,
+            username=current_admin_user,
+            action="USER_ROLE_CHANGE",
+            target=f"User:{user.identifiant}",
+            details=f"Rôle modifié : {ancien} -> {role}",
+        )
+        return {"id": user.id, "identifiant": user.identifiant, "role": user.role}
 
     # ── Journal d'Audit inaltérable ───────────────────────────────────────────
 
@@ -242,7 +283,8 @@ class AdminService:
         try:
             with sqlite3.connect(str(DB_PATH)) as src_conn, sqlite3.connect(str(backup_file)) as dst_conn:
                 src_conn.backup(dst_conn)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Sauvegarde PRA via l'API sqlite3 impossible, repli sur copie de fichier : %s", exc)
             shutil.copy2(DB_PATH, backup_file)
         sha = _calculate_sha256(backup_file)
 
@@ -387,11 +429,17 @@ class AdminService:
         total_backups = len(backups)
         last_backup = backups[0]["date_creation"] if backups else None
 
+        rpo_cible_heures = 24
+        if last_backup is None:
+            statut_pra = "AUCUNE_SAUVEGARDE"
+        else:
+            age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(last_backup)).total_seconds() / 3600
+            statut_pra = "CONFORME" if age_h <= rpo_cible_heures else "NON_CONFORME"
+
         return {
             "rto_cible_minutes": 5,
-            "rto_estime_secondes": 3.5,
-            "rpo_cible_heures": 24,
-            "statut_pra": "CONFORME_BTS_SIO",
+            "rpo_cible_heures": rpo_cible_heures,
+            "statut_pra": statut_pra,
             "total_sauvegardes": total_backups,
             "derniere_sauvegarde": last_backup,
             "chiffrement": "Fernet AES-256",
@@ -401,14 +449,15 @@ class AdminService:
     # ── Persistance des Configurations de Notification ────────────────────────
 
     @staticmethod
-    def get_notification_settings() -> dict[str, Any]:
+    def get_notification_settings(include_secrets: bool = False) -> dict[str, Any]:
         """
-        Rôle : Charge la configuration persistante des canaux d'alerte (déchiffre les secrets Fernet).
-        Entrées : Aucune.
+        Rôle : Charge la configuration persistante des canaux d'alerte.
+        Les secrets (token Telegram, webhook Discord) ne sont JAMAIS renvoyés par défaut :
+        la réponse contient "telegram_token_set" / "discord_webhook_set" (booléens) et des champs vides.
+        Entrées : include_secrets (usage interne uniquement, jamais exposé par l'API).
         Sorties : Dictionnaire de configuration des notifications.
         """
         defaults = {
-            "demo_mode": False,
             "telegram_enabled": False,
             "telegram_token": "",
             "telegram_chat_id": "",
@@ -428,16 +477,23 @@ class AdminService:
             if raw.get("telegram_token_enc"):
                 try:
                     raw["telegram_token"] = decrypt_secret(raw["telegram_token_enc"])
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Jeton Telegram chiffré illisible : %s", exc)
                     raw["telegram_token"] = ""
             if raw.get("discord_webhook_enc"):
                 try:
                     raw["discord_webhook"] = decrypt_secret(raw["discord_webhook_enc"])
-                except Exception:
+                except Exception as exc:
+                    logger.warning("Webhook Discord chiffré illisible : %s", exc)
                     raw["discord_webhook"] = ""
             defaults.update({k: v for k, v in raw.items() if k in defaults})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Fichier de configuration des notifications illisible : %s", exc)
+        defaults["telegram_token_set"] = bool(defaults.get("telegram_token"))
+        defaults["discord_webhook_set"] = bool(defaults.get("discord_webhook"))
+        if not include_secrets:
+            defaults["telegram_token"] = ""
+            defaults["discord_webhook"] = ""
         return defaults
 
     @staticmethod
@@ -452,13 +508,25 @@ class AdminService:
         Sorties : Configuration sauvegardée.
         """
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Secret vide dans la requête = conserver la valeur déjà enregistrée ;
+        # suppression explicite uniquement via clear_telegram_token / clear_discord_webhook.
+        current = AdminService.get_notification_settings(include_secrets=True)
+        if payload.get("clear_telegram_token"):
+            telegram_token = ""
+        else:
+            telegram_token = payload.get("telegram_token") or current.get("telegram_token", "")
+        if payload.get("clear_discord_webhook"):
+            discord_webhook = ""
+        else:
+            discord_webhook = payload.get("discord_webhook") or current.get("discord_webhook", "")
+
         stored = {
-            "demo_mode": bool(payload.get("demo_mode", False)),
             "telegram_enabled": bool(payload.get("telegram_enabled", False)),
-            "telegram_token_enc": encrypt_secret(payload["telegram_token"]) if payload.get("telegram_token") else "",
+            "telegram_token_enc": encrypt_secret(telegram_token) if telegram_token else "",
             "telegram_chat_id": str(payload.get("telegram_chat_id", "")),
             "discord_enabled": bool(payload.get("discord_enabled", False)),
-            "discord_webhook_enc": encrypt_secret(payload["discord_webhook"]) if payload.get("discord_webhook") else "",
+            "discord_webhook_enc": encrypt_secret(discord_webhook) if discord_webhook else "",
             "email_enabled": bool(payload.get("email_enabled", True)),
             "smtp_server": str(payload.get("smtp_server", "smtp.gmail.com")),
             "smtp_port": int(payload.get("smtp_port", 587)),
@@ -473,73 +541,8 @@ class AdminService:
             username=triggered_by,
             action="NOTIFICATION_CONFIG_SAVE",
             target="Canaux d'alerte",
-            details=f"Configuration sauvegardée (Mode Réel={not stored['demo_mode']}, Telegram={stored['telegram_enabled']}, Discord={stored['discord_enabled']}, Email={stored['email_enabled']})",
+            details=f"Configuration sauvegardée (Telegram={stored['telegram_enabled']}, Discord={stored['discord_enabled']}, Email={stored['email_enabled']})",
         )
         return AdminService.get_notification_settings()
 
     # ── Bascule Mode 100 % Réseau Physique Réel ───────────────────────────────
-
-    @staticmethod
-    def reset_to_real_network_only(db: Session, triggered_by: str = "admin") -> dict[str, Any]:
-        """
-        Rôle : Purge les équipements fictifs de démonstration (SW-CORE-01, RTR-EDGE-01, SRV-APP-01, SRV-DB-01, ROGUE-PI-01),
-        conserve/enregistre la machine hôte réelle, scanne le réseau local (ARP/Ping/Ports) et importe la passerelle
-        et les hôtes physiques détectés.
-        Entrées : db, triggered_by.
-        Sorties : Bilan de la bascule en mode 100 % réel.
-        """
-        from backend.app.modules.parc.service import ParcService
-        from backend.app.modules.supervision.hardware_collector import HardwareCollector
-
-        demo_names = {"SW-CORE-01", "RTR-EDGE-01", "SRV-APP-01", "SRV-DB-01", "ROGUE-PI-01"}
-        demo_ips = {"192.168.1.254", "192.168.1.1", "192.168.1.10", "192.168.1.11", "192.168.1.99"}
-
-        # Identifier la vraie passerelle du réseau local pour ne pas la supprimer si elle est en 192.168.1.1 / .254
-        real_scan = ParcService.scan_real_network()
-        real_discovered_ips = {d["ip"] for d in real_scan}
-
-        removed_names: list[str] = []
-        all_eqs = db.query(Equipement).all()
-        for eq in all_eqs:
-            is_demo_name = eq.nom in demo_names
-            is_demo_ip_not_real = (eq.ip in demo_ips) and (eq.ip not in real_discovered_ips)
-            if is_demo_name or is_demo_ip_not_real:
-                removed_names.append(f"{eq.nom} ({eq.ip})")
-                db.query(Metrique).filter(Metrique.equipement_id == eq.id).delete()
-                db.query(Prediction).filter(Prediction.equipement_id == eq.id).delete()
-                db.query(Alerte).filter(Alerte.equipement_id == eq.id).delete()
-                db.query(AuditReseau).filter(AuditReseau.equipement_id == eq.id).delete()
-                db.query(SauvegardeConfig).filter(SauvegardeConfig.equipement_id == eq.id).delete()
-                db.delete(eq)
-
-        db.commit()
-
-        # Enregistrer et sonder la machine hôte locale
-        HardwareCollector.collect_live_metrics(db)
-
-        # Importer automatiquement les vrais équipements découverts sur le LAN (passerelle, etc.)
-        imported_count = 0
-        if real_scan:
-            import_res = ParcService.import_real_devices(db, real_scan, None)
-            imported_count = import_res.get("imported", 0)
-
-        # Sonder tous les équipements réels présents
-        probe_res = ParcService.probe_all_equipments(db)
-
-        _record_audit(
-            db,
-            user_id=None,
-            username=triggered_by,
-            action="ENV_SWITCH_REAL_NETWORK",
-            target="Parc & Topologie",
-            details=f"Purge de {len(removed_names)} équipements démo ({', '.join(removed_names) or 'aucun'}), {imported_count} équipements physiques importés.",
-        )
-
-        return {
-            "status": "REAL_NETWORK_ACTIVE",
-            "removed_demo_equipments": removed_names,
-            "discovered_lan_devices": len(real_scan),
-            "imported_lan_devices": imported_count,
-            "total_active_equipments": probe_res.get("total", 0),
-            "online_equipments": probe_res.get("online", 0),
-        }

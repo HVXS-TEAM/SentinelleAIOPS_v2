@@ -2,17 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './ui/Icon';
 import { useTheme } from '../context/ThemeContext';
+import { AccountSecurityModal } from './AccountSecurityModal';
+import { supervisionService } from '../services/api';
+import type { Alerte } from '../types';
 
 import type { AuthenticatedUser } from '../pages/LoginPage';
-
-interface Notification {
-  id: string;
-  title: string;
-  description: string;
-  severity: 'CRITICAL' | 'WARNING' | 'INFO';
-  time: string;
-  module: string;
-}
 
 interface HeaderProps {
   title?: string;
@@ -25,32 +19,17 @@ interface HeaderProps {
   onLogout?: () => void;
 }
 
-const NOTIFICATIONS: Notification[] = [
-  {
-    id: 'n1',
-    title: 'Surcharge CPU détectée',
-    description: 'Switch-Core-01 atteint 98% d\'utilisation.',
-    severity: 'CRITICAL',
-    time: 'Il y a 2m',
-    module: 'NetDevOps',
-  },
-  {
-    id: 'n2',
-    title: 'Latence réseau anomale',
-    description: 'Lien vers Datacenter B > 50ms.',
-    severity: 'WARNING',
-    time: 'Il y a 15m',
-    module: 'Supervision',
-  },
-  {
-    id: 'n3',
-    title: 'Tentative d\'intrusion bloquée',
-    description: 'IP suspecte détectée sur Firewall-Edge.',
-    severity: 'CRITICAL',
-    time: 'Il y a 1h',
-    module: 'Sécurité',
-  },
-];
+/** Durée écoulée depuis une date ISO, en français (« il y a 5 min »). */
+const depuis = (iso: string): string => {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const min = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (min < 1) return "à l'instant";
+  if (min < 60) return `il y a ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 48) return `il y a ${h} h`;
+  return `il y a ${Math.round(h / 24)} j`;
+};
 
 export const Header: React.FC<HeaderProps> = ({
   actions,
@@ -61,9 +40,35 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { preference, activeTheme, currentHour, cycleTheme } = useTheme();
   const [showNotifs, setShowNotifs] = useState(false);
+  const [alertes, setAlertes] = useState<Alerte[]>([]);
+  const [alertesIndisponibles, setAlertesIndisponibles] = useState(false);
+
+  // Alertes actives réelles, rafraîchies toutes les 30 s tant que l'utilisateur est connecté.
+  useEffect(() => {
+    if (!currentUser) return;
+    let actif = true;
+    const charger = () =>
+      supervisionService
+        .getAlerts('Active', 10)
+        .then(liste => {
+          if (!actif) return;
+          setAlertes(liste);
+          setAlertesIndisponibles(false);
+        })
+        .catch(() => {
+          if (actif) setAlertesIndisponibles(true);
+        });
+    void charger();
+    const timer = setInterval(charger, 30000);
+    return () => {
+      actif = false;
+      clearInterval(timer);
+    };
+  }, [currentUser]);
   const [search, setSearch] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [telemetryInterval, setTelemetryInterval] = useState('5s');
   const [soundAlerts, setSoundAlerts] = useState(true);
   const [compactMode, setCompactMode] = useState(false);
@@ -92,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const criticalCount = NOTIFICATIONS.filter(n => n.severity === 'CRITICAL').length;
+  const criticalCount = alertes.filter(a => a.severite === 'CRITICAL').length;
 
   // Fermeture de la modale via la touche Échap
   useEffect(() => {
@@ -156,9 +161,15 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-[11px] font-mono text-[#ffb4ab]">{criticalCount} actives</span>
               </div>
               <div className="divide-y divide-[#272a2d]/60">
-                {NOTIFICATIONS.map(n => (
+                {alertesIndisponibles && (
+                  <p className="p-4 text-[11px] font-mono text-[#ffb4ab]">Alertes indisponibles : serveur injoignable.</p>
+                )}
+                {!alertesIndisponibles && alertes.length === 0 && (
+                  <p className="p-4 text-[11px] font-mono text-[#87938e]">Aucune alerte active.</p>
+                )}
+                {alertes.map(a => (
                   <div
-                    key={n.id}
+                    key={a.id}
                     onClick={() => {
                       setShowNotifs(false);
                       onNavigateTab?.('supervision');
@@ -167,14 +178,16 @@ export const Header: React.FC<HeaderProps> = ({
                   >
                     <div className="flex items-center justify-between text-[10px] font-mono mb-1">
                       <span className={`px-1.5 py-0.5 rounded font-bold ${
-                        n.severity === 'CRITICAL' ? 'bg-[#ffb4ab]/15 text-[#ffb4ab]' : 'bg-orange-500/15 text-orange-400'
+                        a.severite === 'CRITICAL' ? 'bg-[#ffb4ab]/15 text-[#ffb4ab]' : 'bg-orange-500/15 text-orange-400'
                       }`}>
-                        {n.severity}
+                        {a.severite}
                       </span>
-                      <span className="text-[#87938e]">{n.time}</span>
+                      <span className="text-[#87938e]">{depuis(a.date_creation)}</span>
                     </div>
-                    <p className="text-xs font-medium text-[#e0e3e6]">{n.title}</p>
-                    <p className="text-[11px] text-[#87938e] mt-0.5">{n.description}</p>
+                    <p className="text-xs font-medium text-[#e0e3e6]">{a.titre}</p>
+                    <p className="text-[11px] text-[#87938e] mt-0.5">
+                      {a.equipement_nom ? `${a.equipement_nom} — ` : ''}{a.message}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -305,6 +318,17 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Gestion Utilisateurs & RBAC</span>
                 </button>
                 <button
+                  id="header-menu-security-btn"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowSecurityModal(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[#bdc9c3] hover:text-[#e0e3e6] hover:bg-[#1d2022] transition-colors text-left cursor-pointer"
+                >
+                  <Icon name="verified_user" size="xs" className="text-[#00f2c3]" />
+                  <span>Sécurité du compte (MFA)</span>
+                </button>
+                <button
                   id="header-menu-supervision-btn"
                   onClick={() => {
                     setShowProfileMenu(false);
@@ -334,6 +358,8 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {showSecurityModal && <AccountSecurityModal onClose={() => setShowSecurityModal(false)} />}
 
       {/* Backdrop de fermeture pour les menus volants */}
       {(showNotifs || showProfileMenu) && (

@@ -104,7 +104,7 @@ export const SupervisionPage: React.FC = () => {
   const [thresholdsSaved, setThresholdsSaved] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showInterventionDrawer, setShowInterventionDrawer] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const [ttf, setTtf] = useState<{ jours: number; heures: number }>({ jours: 14, heures: 0 });
@@ -333,24 +333,26 @@ export const SupervisionPage: React.FC = () => {
     setTimeout(() => setThresholdsSaved(false), 2500);
   };
 
-  const handleSimulateStress = async () => {
-    setIsSimulating(true);
-    showToast(`Injection d'une charge disque et recalcul ML TTF sur ${selectedDevice}...`);
+  const handleRecalculateTtf = async () => {
+    setIsRecalculating(true);
+    showToast(`Recalcul du TTF sur ${selectedDevice} à partir des métriques collectées...`);
     try {
-      const pred = await supervisionService.simulateStress(selectedEquipementId, 91.5);
+      const pred = await supervisionService.recalculateTTF(selectedEquipementId);
       if (pred && typeof pred.ttf_estime_heures === 'number') {
         const totalH = Math.max(1, Math.round(pred.ttf_estime_heures));
         const j = Math.floor(totalH / 24);
         const h = totalH % 24;
         setTtf({ jours: j, heures: h });
-        showToast(`Modèle mis à jour : TTF recalculé à ${j}j ${h}h (Pente +${pred.pente_horaire.toFixed(2)}%/h).`);
+        showToast(`TTF recalculé : ${j}j ${h}h (pente ${pred.pente_horaire.toFixed(2)} %/h).`);
+      } else {
+        showToast('Historique insuffisant pour estimer un TTF fiable.');
       }
       await loadHardwareLive();
       await loadParcAndPredictions();
     } catch {
-      showToast('Erreur lors du recalcul prédictif.');
+      showToast('Recalcul impossible : le serveur a refusé ou n\'a pas pu traiter la demande.');
     } finally {
-      setIsSimulating(false);
+      setIsRecalculating(false);
     }
   };
 
@@ -547,13 +549,13 @@ export const SupervisionPage: React.FC = () => {
           </button>
 
           <button
-            id="supervision-simulate-stress-btn"
-            onClick={handleSimulateStress}
-            disabled={isSimulating}
+            id="supervision-recalculate-ttf-btn"
+            onClick={handleRecalculateTtf}
+            disabled={isRecalculating}
             className="w-full mt-2.5 flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#78d8ba] bg-[#78d8ba]/10 hover:bg-[#78d8ba]/20 text-[#78d8ba] font-mono font-bold text-xs transition-colors cursor-pointer"
           >
             <Icon name="monitoring" size="xs" className="text-[#78d8ba]" />
-            <span>{isSimulating ? 'Calcul du modèle...' : 'Injecter Charge Test & Recalculer TTF'}</span>
+            <span>{isRecalculating ? 'Calcul du modèle...' : 'Recalculer le TTF'}</span>
           </button>
         </div>
 

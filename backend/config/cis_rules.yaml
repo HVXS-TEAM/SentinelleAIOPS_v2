@@ -2,6 +2,8 @@
 # Format : chaque règle déclare un pattern attendu (regex) ou interdit (regex_forbidden)
 # severity : CRITICAL | HIGH | MEDIUM | LOW
 # cis_ref  : référence section CIS Benchmark document
+# remediation_commands : commandes IOS exactes applicables telles quelles ; absent quand la
+#   correction exige un paramètre propre au site (IP, hash, ACL...) : correction manuelle.
 
 version: "1.0"
 platform: "cisco-ios"
@@ -17,6 +19,7 @@ rules:
       La commande 'service password-encryption' active le chiffrement Type 7.
     pattern: "service password-encryption"
     remediation: "Ajouter 'service password-encryption' en configuration globale."
+    remediation_commands: "service password-encryption"
 
   - id: CIS-1.2
     title: "Utiliser un secret enable fort (Type 5 ou 8)"
@@ -26,7 +29,7 @@ rules:
       Le secret enable doit utiliser MD5 (Type 5) ou PBKDF2 (Type 8),
       jamais un 'enable password' en clair ou Type 7.
     pattern: "enable secret [589]"
-    regex_forbidden: "enable password"
+    regex_forbidden: "^\\s*enable password\\b"
     remediation: "Remplacer 'enable password' par 'enable secret 8 <hash>'."
 
   - id: CIS-1.3
@@ -37,6 +40,7 @@ rules:
       Les sessions VTY inactives doivent expirer après 10 minutes maximum.
     pattern: "exec-timeout 10 0"
     remediation: "Ajouter 'exec-timeout 10 0' sous 'line vty 0 4'."
+    remediation_commands: "line vty 0 4\nexec-timeout 10 0"
 
   - id: CIS-1.4
     title: "Restreindre l'accès SSH (désactiver Telnet)"
@@ -48,6 +52,7 @@ rules:
     pattern: "transport input ssh"
     regex_forbidden: "transport input telnet"
     remediation: "Configurer 'transport input ssh' sous 'line vty 0 4'."
+    remediation_commands: "line vty 0 4\ntransport input ssh"
 
   - id: CIS-1.5
     title: "Activer SSH version 2"
@@ -58,6 +63,7 @@ rules:
       Seul SSHv2 doit être utilisé.
     pattern: "ip ssh version 2"
     remediation: "Ajouter 'ip ssh version 2' en configuration globale."
+    remediation_commands: "ip ssh version 2"
 
   - id: CIS-1.6
     title: "Désactiver l'accès HTTP non sécurisé"
@@ -66,8 +72,9 @@ rules:
     description: >
       Le serveur HTTP intégré expose une interface d'administration non chiffrée.
       Il doit être désactivé au profit de HTTPS ou de CLI SSH.
-    regex_forbidden: "ip http server"
+    regex_forbidden: "^\\s*ip http server\\b"
     remediation: "Ajouter 'no ip http server' en configuration globale."
+    remediation_commands: "no ip http server"
 
   # ── Section 2 : Logging & Audit ────────────────────────────────────────────
   - id: CIS-2.1
@@ -87,6 +94,7 @@ rules:
       Les entrées de log doivent inclure l'heure pour faciliter la corrélation.
     pattern: "service timestamps log datetime"
     remediation: "Ajouter 'service timestamps log datetime msec localtime show-timezone'."
+    remediation_commands: "service timestamps log datetime msec localtime show-timezone"
 
   - id: CIS-2.3
     title: "Définir le niveau de logging (informational minimum)"
@@ -97,6 +105,7 @@ rules:
       pour capturer les événements importants.
     pattern: "logging trap informational"
     remediation: "Ajouter 'logging trap informational'."
+    remediation_commands: "logging trap informational"
 
   # ── Section 3 : NTP & Synchronisation ─────────────────────────────────────
   - id: CIS-3.1
@@ -138,6 +147,7 @@ rules:
       augmentent la surface d'attaque sans apporter de valeur.
     pattern: "no ip source-route"
     remediation: "Ajouter 'no ip source-route' en configuration globale."
+    remediation_commands: "no ip source-route"
 
   - id: CIS-4.3
     title: "Activer les ACL de protection sur les interfaces"
@@ -167,8 +177,9 @@ rules:
     description: >
       SNMPv1/v2 utilisent des community strings en clair et doivent être
       remplacés par SNMPv3 avec authentification et chiffrement.
-    regex_forbidden: "snmp-server community public"
+    regex_forbidden: "^\\s*snmp-server community public\\b"
     remediation: "Supprimer 'snmp-server community public' et migrer vers SNMPv3."
+    remediation_commands: "no snmp-server community public"
 
   - id: CIS-5.3
     title: "Configurer une chaîne de communauté SNMP non triviale"
@@ -177,5 +188,5 @@ rules:
     description: >
       Si SNMPv2c est utilisé, la community string ne doit jamais être
       'public' ou 'private'.
-    regex_forbidden: "snmp-server community private"
+    regex_forbidden: "^\\s*snmp-server community private\\b"
     remediation: "Remplacer la community par une valeur forte et unique."

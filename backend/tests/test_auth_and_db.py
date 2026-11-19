@@ -106,7 +106,8 @@ def test_register_user_success():
     assert reg_resp.status_code == 200
     data = reg_resp.json()
     assert data["identifiant"] == test_id
-    assert data["role"] == "Administrateur"
+    # Le rôle demandé ("Administrateur") doit être ignoré : auto-inscription = Visiteur
+    assert data["role"] == "Visiteur"
     assert "access_token" in data
 
     # 2. Vérification connexion directe avec les nouveaux identifiants
@@ -117,7 +118,7 @@ def test_register_user_success():
     assert login_resp.status_code == 200
     login_data = login_resp.json()
     assert login_data["identifiant"] == test_id
-    assert login_data["role"] == "Administrateur"
+    assert login_data["role"] == "Visiteur"
 
 
 def test_register_duplicate_user():

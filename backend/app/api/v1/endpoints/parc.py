@@ -24,6 +24,10 @@ from backend.app.core.security import encrypt_secret, decrypt_secret
 from backend.app.api.deps import get_current_user, require_roles
 from backend.app.core.audit import log_audit_action
 
+import logging
+logger = logging.getLogger("sentinelle.api.parc")
+
+
 router = APIRouter(prefix="/parc", tags=["Gestion de Parc & Inventaire"])
 
 
@@ -41,8 +45,8 @@ def list_equipements(
     """
     try:
         HardwareCollector.get_or_create_host_equipment(db)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Création de l'équipement hôte local impossible : %s", exc)
 
     query = db.query(Equipement)
     if groupe and groupe != "Tous":
@@ -119,8 +123,8 @@ def create_equipement(
 
     try:
         ParcService.probe_equipment(db, new_eq)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Sonde initiale après création d'équipement en échec : %s", exc)
 
     log_audit_action(
         db=db,
@@ -184,12 +188,8 @@ def trigger_snmp_scan(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
 ):
-    """Déclenche la découverte réseau SNMP et lève une alerte en cas d'équipement inconnu (Rogue)."""
-    return ParcService.simulate_snmp_discovery(
-        db,
-        ip_range=req.plage_ip,
-        inject_rogue=req.simuler_rogue_device,
-    )
+    """Découverte réseau réelle ; une alerte est levée pour tout équipement actif absent du parc."""
+    return ParcService.discover_network(db, ip_range=req.plage_ip)
 
 
 @router.get("/local-network-info", response_model=LocalNetworkInfoOut, summary="Informations réseau physique de l'hôte")
@@ -240,8 +240,8 @@ def execute_ssh_command_endpoint(
             if eq.identifiants_chiffres and not password:
                 try:
                     password = decrypt_secret(eq.identifiants_chiffres)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Déchiffrement des identifiants SSH impossible : %s", exc)
 
     result = SSHExecutionService.execute(
         ip=ip,
@@ -266,7 +266,7 @@ def execute_ssh_command_endpoint(
 @router.post("/recalculate-scores", summary="Recalcul des scores de santé")
 def recalculate_health_scores(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
 ):
     """Actualise les notes de santé (0 à 100) pour l'intégralité du parc."""
     scores = ParcService.recalculate_all_health_scores(db)

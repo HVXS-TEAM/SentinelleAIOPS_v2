@@ -12,12 +12,21 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import ROLES_OPERATEURS, get_current_user, require_roles
 from backend.app.db.session import get_db
 from backend.app.modules.dashboard.service import DashboardService
 from backend.app.modules.parc.service import ParcService
 from backend.app.modules.supervision.hardware_collector import HardwareCollector
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+import logging
+logger = logging.getLogger("sentinelle.api.dashboard")
+
+
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["Dashboard"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/summary", summary="Synthèse globale et KPIs multi-modules")
@@ -35,7 +44,11 @@ def get_dashboard_summary(db: Session = Depends(get_db)) -> dict[str, Any]:
     return DashboardService.get_summary(db)
 
 
-@router.post("/refresh", summary="Rafraîchissement actif des sondes matérielles et réseau")
+@router.post(
+    "/refresh",
+    summary="Rafraîchissement actif des sondes matérielles et réseau",
+    dependencies=[Depends(require_roles(ROLES_OPERATEURS))],
+)
 def refresh_dashboard_data(db: Session = Depends(get_db)) -> dict[str, Any]:
     """
     Rôle : Déclenche une collecte matérielle live (psutil) et sonde tous les équipements du parc,
@@ -44,6 +57,6 @@ def refresh_dashboard_data(db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
         HardwareCollector.collect_live_metrics(db)
         ParcService.probe_all_equipments(db)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Rafraîchissement du tableau de bord : collecte des métriques de l'hôte en échec : %s", exc)
     return DashboardService.get_summary(db)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Icon } from '../components/ui/Icon';
-import { authService } from '../services/api';
+import { authService, isMfaRequiredError, mfaService } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -15,55 +15,22 @@ export interface AuthenticatedUser {
 interface LoginPageProps {
   onLoginSuccess: (user: AuthenticatedUser) => void;
   onSwitchToRegister?: () => void;
+  onForgotPassword?: () => void;
 }
 
-/* ── Comptes de Démo ─────────────────────────────────────────────────────── */
-const DEMO_CREDENTIALS: Record<string, { username: string; pass: string; name: string; role: 'Administrateur' | 'Technicien' | 'Visiteur'; email: string }> = {
-  admin: {
-    username: 'admin',
-    pass: 'AdminPassword2026!',
-    name: 'Sarah Connor',
-    role: 'Administrateur',
-    email: 'admin@sentinelle.local',
-  },
-  tech: {
-    username: 'tech',
-    pass: 'TechPassword2026!',
-    name: 'David Bowman',
-    role: 'Technicien',
-    email: 'technicien@sentinelle.local',
-  },
-  visiteur: {
-    username: 'visiteur',
-    pass: 'VisiteurPassword2026!',
-    name: 'Ellen Ripley',
-    role: 'Visiteur',
-    email: 'visiteur@sentinelle.local',
-  },
-};
-
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchToRegister }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchToRegister, onForgotPassword }) => {
   const { activeTheme, preference, currentHour, cycleTheme } = useTheme();
-  const [profile, setProfile] = useState<'admin' | 'tech' | 'visiteur'>('admin');
-  const [username, setUsername] = useState(DEMO_CREDENTIALS.admin.username);
-  const [password, setPassword] = useState(DEMO_CREDENTIALS.admin.pass);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  /* Changement de profil pré-remplissant automatiquement les champs */
-  const handleProfileChange = (newProfile: 'admin' | 'tech' | 'visiteur') => {
-    setProfile(newProfile);
-    setUsername(DEMO_CREDENTIALS[newProfile].username);
-    setPassword(DEMO_CREDENTIALS[newProfile].pass);
-    setErrorMsg(null);
-    setFieldErrors({});
-  };
-
-  /* Soumission de la connexion réelle avec fallback sécurisé */
+  /* Soumission de la connexion */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -79,6 +46,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
       errors.password = 'Le mot de passe est requis.';
     }
 
+    if (mfaRequired && !mfaCode.trim()) {
+      errors.mfa = "Saisissez le code de votre application d'authentification (ou un code de secours).";
+    }
+
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       return;
@@ -87,19 +58,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
     setIsLoading(true);
 
     try {
-      // Appel API réel vers FastAPI /api/v1/auth/login
-      const authData = await authService.login(trimmedUser, trimmedPass);
+      // Appel API réel vers FastAPI /api/v1/auth/login (second facteur envoyé s'il est demandé)
+      const authData = await authService.login(trimmedUser, trimmedPass, mfaRequired ? mfaCode.trim() : undefined);
+      const profileInfo = await mfaService.me().catch(() => null);
       const user: AuthenticatedUser = {
         identifiant: authData.identifiant,
         nom_complet: authData.nom_complet,
         role: authData.role as 'Administrateur' | 'Technicien' | 'Visiteur',
-        email: `${authData.identifiant}@sentinelle.local`,
+        email: profileInfo?.email ?? '',
         token: authData.access_token,
       };
 
       localStorage.setItem('sentinelle_auth_user', JSON.stringify(user));
       onLoginSuccess(user);
     } catch (err: unknown) {
+      if (isMfaRequiredError(err)) {
+        // Mot de passe correct : le compte exige un second facteur
+        setMfaRequired(true);
+        setMfaCode('');
+        return;
+      }
       let errorDetail: string | null = null;
       let hasResponse = false;
       if (err && typeof err === 'object' && 'response' in err) {
@@ -199,34 +177,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
           </div>
         )}
 
-        {/* Formulaire de Connexion Libre & Réel avec validation sans infobulles natives */}
+        {/* Formulaire de connexion (validation sans infobulles natives) */}
         <form onSubmit={handleSubmit} noValidate className="w-full space-y-4 text-xs">
-
-          {/* Raccourcis de test démo optionnels */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="block font-mono text-[10px] font-semibold text-[#b9cac2] uppercase tracking-wider">
-                COMPTES DE DÉMONSTRATION
-              </label>
-              <span className="text-[9px] text-[#00f2c3] font-mono">1 clic</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {(['admin', 'tech', 'visiteur'] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => handleProfileChange(key)}
-                  className={`py-1.5 px-2 rounded-lg border font-mono text-[10px] transition-all cursor-pointer text-center ${
-                    profile === key
-                      ? 'bg-[#00f2c3]/20 border-[#00f2c3] text-[#00f2c3] font-bold shadow-[0_0_8px_rgba(0,242,195,0.2)]'
-                      : 'bg-[#222b33]/80 border-[#3a4a44] text-[#b9cac2] hover:border-[#b9cac2]/50 hover:text-white'
-                  }`}
-                >
-                  {key === 'admin' ? 'Admin' : key === 'tech' ? 'Tech' : 'Visiteur'}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* 1. IDENTIFIANT */}
           <div className="space-y-1.5">
@@ -249,7 +201,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                   setUsername(e.target.value);
                   if (fieldErrors.username) setFieldErrors(prev => ({ ...prev, username: '' }));
                 }}
-                placeholder="Votre identifiant (ex: edwin, admin)"
+                placeholder="Votre identifiant"
                 className="w-full pl-9 pr-3 py-2.5 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
               />
             </div>
@@ -310,26 +262,49 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
             )}
           </div>
 
-          {/* 3. CODE MFA (Si Administrateur) */}
-          {profile === 'admin' && (
+          {onForgotPassword && (
+            <div className="text-right -mt-2">
+              <button
+                id="login-forgot-password-btn"
+                type="button"
+                onClick={onForgotPassword}
+                className="text-[11px] font-mono text-[#00f2c3] hover:underline cursor-pointer"
+              >
+                Mot de passe oublié ?
+              </button>
+            </div>
+          )}
+
+          {/* 3. SECOND FACTEUR : affiché uniquement si le serveur l'exige pour ce compte */}
+          {mfaRequired && (
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="block font-mono text-[10px] font-semibold text-[#00f2c3] uppercase tracking-wider flex items-center gap-1">
-                  <Icon name="key" size="xs" />
-                  <span>CODE MFA (FACULTATIF DÉMO)</span>
-                </label>
-              </div>
+              <label htmlFor="login-mfa-input" className="block font-mono text-[10px] font-semibold text-[#00f2c3] uppercase tracking-wider flex items-center gap-1">
+                <Icon name="key" size="xs" />
+                <span>CODE D'AUTHENTIFICATION (MFA)</span>
+              </label>
               <div className="relative rounded-lg bg-[#222b33] border border-[#3a4a44] focus-within:border-[#00f2c3] focus-within:shadow-[0_0_12px_rgba(0,242,195,0.2)] transition-all">
                 <input
                   id="login-mfa-input"
                   type="text"
-                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={20}
                   value={mfaCode}
                   onChange={e => setMfaCode(e.target.value)}
-                  placeholder="123456 (ou laissez vide)"
+                  placeholder="123456 ou code de secours"
                   className="w-full px-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-center tracking-widest text-xs"
                 />
               </div>
+              <p className="text-[10px] text-[#b9cac2]/70 font-mono">
+                Code à 6 chiffres de votre application, ou l'un de vos codes de secours (usage unique).
+              </p>
+              {fieldErrors.mfa && (
+                <span className="text-[11px] font-mono text-[#ffb4ab] flex items-center gap-1 mt-0.5">
+                  <Icon name="error" size="xs" />
+                  <span>{fieldErrors.mfa}</span>
+                </span>
+              )}
             </div>
           )}
 
@@ -362,7 +337,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
                 onClick={onSwitchToRegister}
                 className="text-[#00f2c3] font-bold hover:underline inline-flex items-center gap-1 ml-1 cursor-pointer"
               >
-                <span>Créer un compte</span>
+                <span>Créer un nouveau compte</span>
                 <Icon name="person_add" size="xs" />
               </button>
             </p>
@@ -483,14 +458,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onSwitchTo
               </button>
             </div>
             <p className="text-[#b9cac2] mb-3 leading-relaxed">
-              Pour des raisons de conformité SOC2 et de durcissement CIS, contactez le Responsable de la Sécurité des Systèmes d'Information (RSSI) ou utilisez votre clé de secours YubiKey.
+              Contactez un administrateur de la plateforme Sentinelle : il peut désactiver ou recréer votre compte et
+              réinitialiser votre second facteur (MFA) si vous avez perdu votre appareil.
             </p>
-            <div className="p-2.5 rounded bg-[#222b33] border border-[#3a4a44] font-mono text-[11px] text-[#00f2c3] mb-4">
-              Comptes démo préconfigurés :<br />
-              • Admin: <span className="text-white">admin / AdminPassword2026!</span><br />
-              • Tech: <span className="text-white">tech / TechPassword2026!</span><br />
-              • Visiteur: <span className="text-white">visiteur / VisiteurPassword2026!</span>
-            </div>
             <button
               onClick={() => setShowForgotModal(false)}
               className="w-full py-2 rounded bg-[#00f2c3] text-[#002118] font-bold cursor-pointer"

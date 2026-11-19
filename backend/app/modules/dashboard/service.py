@@ -24,8 +24,11 @@ from backend.app.db.models import (
     Metrique,
     Prediction,
 )
-from backend.app.modules.netdevops.service import _SIMULATED_CONFIGS, _audit_config
 from backend.app.modules.supervision.hardware_collector import HardwareCollector
+
+
+import logging
+logger = logging.getLogger("sentinelle.dashboard.service")
 
 
 class DashboardService:
@@ -153,8 +156,8 @@ class DashboardService:
             )
             if not has_host_metrics:
                 HardwareCollector.collect_live_metrics(db)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Synthèse : équipement hôte local indisponible : %s", exc)
 
         # 1. Parc & Santé
         equipements = db.query(Equipement).all()
@@ -233,9 +236,6 @@ class DashboardService:
             passed = sum(1 for a in eq_audits if a.statut in ("Conforme", "Corrigé"))
             cis_scores.append(round((passed / len(eq_audits)) * 100.0, 1))
 
-        for dev_id, cfg in _SIMULATED_CONFIGS.items():
-            rep = _audit_config(dev_id, cfg)
-            cis_scores.append(rep["score"])
         cis_moyenne = round(sum(cis_scores) / len(cis_scores), 1) if cis_scores else 0.0
 
         # 6. Activités récentes d'audit

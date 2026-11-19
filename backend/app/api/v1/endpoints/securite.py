@@ -1,4 +1,5 @@
 """Endpoints de l'API de Cybersécurité, Détection d'Anomalies (Isolation Forest) et Pare-feu Actif."""
+from datetime import datetime, timedelta, timezone
 from typing import List
 import socket
 try:
@@ -9,17 +10,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
-from backend.app.db.models import EvenementSecurite, User, Equipement
+from backend.app.core.config import settings
+from backend.app.db.models import EvenementSecurite, JournalAuthentification, User, Equipement
 from backend.app.schemas.securite import (
     EvenementSecuriteOut,
     AnalyzeBatchRequest,
-    BruteForceSimulationRequest,
     BlockIpRequest,
     IsolateDeviceRequest,
     SecurityStatsResponse,
 )
 from backend.app.modules.securite.service import SecurityService
+from backend.app.modules.securite.syslog_receiver import get_receiver
+from sqlalchemy import func
 from backend.app.api.deps import get_current_user, require_roles
+
+import logging
+logger = logging.getLogger("sentinelle.api.securite")
+
 
 router = APIRouter(prefix="/securite", tags=["Cybersécurité & Détection d'Anomalies (IA)"])
 
@@ -52,9 +59,23 @@ def get_security_stats(
     Entrées : Session DB, utilisateur authentifié.
     Sorties : Objet SecurityStatsResponse.
     """
-    total = db.query(EvenementSecurite).count()
+    total = db.query(JournalAuthentification).count()
     anomalies = db.query(EvenementSecurite).filter(EvenementSecurite.is_anomaly.is_(True)).count()
-    critiques = db.query(EvenementSecurite).filter(EvenementSecurite.severite == "CRITICAL").count()
+    critiques = (
+        db.query(EvenementSecurite)
+        .filter(EvenementSecurite.is_anomaly.is_(True), EvenementSecurite.severite == "CRITICAL")
+        .count()
+    )
+    bloquees = db.query(EvenementSecurite).filter(EvenementSecurite.explication.like("[BLOQUÉ]%")).count()
+    par_source = dict(
+        db.query(JournalAuthentification.origine, func.count(JournalAuthentification.id))
+        .group_by(JournalAuthentification.origine).all()
+    )
+    derniere = db.query(func.max(JournalAuthentification.horodatage)).scalar()
+    echantillons = int(len(SecurityService._matrice_reference(
+        db, datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=settings.SECURITY_WINDOW_MINUTES),
+        settings.SECURITY_WINDOW_MINUTES)))
+    actif = echantillons >= settings.SECURITY_MIN_BASELINE_SAMPLES
 
     active_conns = 0
     listen_ports = 0
@@ -64,31 +85,36 @@ def get_security_stats(
                 listen_ports += 1
             elif c.raddr:
                 active_conns += 1
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("get_security_stats : repli après erreur : %s", exc)
 
-    precision = 94.8 if total > 0 else 100.0
-    baseline_accord = 91.2 if total > 0 else 100.0
-
+    rec = get_receiver()
     return {
         "total_evenements": total,
         "total_anomalies": anomalies,
         "attaques_critiques": critiques,
-        "taux_precision_ia": precision,
-        "baseline_accord_pct": baseline_accord,
+        "ips_bloquees": bloquees,
+        "modele_actif": "isolation_forest+regles_statiques" if actif else "regles_statiques",
+        "echantillons_baseline": echantillons,
+        "echantillons_requis": settings.SECURITY_MIN_BASELINE_SAMPLES,
+        "evenements_par_source": par_source,
+        "derniere_observation": derniere,
+        "syslog_actif": rec is not None,
+        "syslog_datagrammes_recus": rec.recus if rec else 0,
+        "syslog_ignores_source_inconnue": rec.ignores_source_inconnue if rec else 0,
         "connexions_actives_hote": active_conns,
         "ports_ecoute_hote": listen_ports,
     }
 
 
-@router.post("/scan-real", summary="Scan réel des journaux Windows/Linux et des connexions réseau de l'hôte")
+@router.post("/scan-real", summary="Lecture et analyse des journaux d'authentification réels de l'hôte")
 def run_real_security_scan_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
 ):
     """
-    Rôle : Collecte les vrais événements de sécurité Windows (4625/4624) ou Linux auth.log ainsi que les sockets psutil,
-           et les analyse via Isolation Forest.
+    Rôle : Lit le journal d'authentification de l'hôte (Windows Security 4625/4624, auth.log ou journald),
+           l'enregistre, puis détecte les anomalies. Les sources illisibles sont signalées dans `sources`.
     Entrées : Session DB, utilisateur authentifié.
     Sorties : Rapport de scan complet.
     """
@@ -106,14 +132,20 @@ def block_ip_endpoint(
     Entrées : Payload BlockIpRequest, session DB, utilisateur authentifié.
     Sorties : Confirmation de la règle pare-feu appliquée.
     """
-    return SecurityService.block_ip_address(
-        db=db,
-        source_ip=req.source_ip,
-        incident_id=req.incident_id,
-        equipement_id=req.equipement_id,
-        motif=req.motif or "Blocage manuel opérateur SOC",
-        user=current_user,
-    )
+    try:
+        res = SecurityService.block_ip_address(
+            db=db,
+            source_ip=req.source_ip,
+            incident_id=req.incident_id,
+            equipement_id=req.equipement_id,
+            motif=req.motif or "Blocage manuel opérateur SOC",
+            user=current_user,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if res["status"] != "BLOCKED":
+        raise HTTPException(status_code=409, detail=res["message"])
+    return res
 
 
 @router.post("/isolate-device", summary="Isoler un équipement en quarantaine réseau")
@@ -136,36 +168,16 @@ def isolate_device_endpoint(
     )
 
 
-@router.post("/analyze-batch", summary="Analyse d'un lot de logs par Isolation Forest")
+@router.post("/analyze-batch", summary="Analyse d'un lot de logs fourni (sans enregistrement)")
 def analyze_log_batch(
     req: AnalyzeBatchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
 ):
-    """Soumet un lot de lignes de logs à l'algorithme d'Isolation Forest pour classification."""
+    """Analyse des lignes sshd / Cisco IOS fournies ; rien n'est enregistré en base."""
     return SecurityService.train_and_detect_anomalies(
         db=db,
         log_batch=req.logs,
         equipement_id=req.equipement_id,
     )
 
-
-@router.post("/simulate-bruteforce", summary="Test d'intrusion : Attaque Brute-force SSH & Corrélation")
-def simulate_bruteforce(
-    req: BruteForceSimulationRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["Administrateur", "Technicien"])),
-):
-    """Injecte une rafale d'échecs SSH et déclenche la détection Isolation Forest ainsi que la corrélation CPU."""
-    target = db.query(Equipement).filter(Equipement.id == req.equipement_id).first()
-    if not target:
-        target = db.query(Equipement).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Équipement cible introuvable")
-
-    return SecurityService.simulate_bruteforce_attack(
-        db=db,
-        equipement_id=target.id,
-        attacker_ip=req.attacker_ip,
-        target_server_name=target.nom,
-    )

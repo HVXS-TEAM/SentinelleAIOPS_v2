@@ -41,9 +41,9 @@ def test_dashboard_service_summary():
         db.close()
 
 
-def test_api_dashboard_summary_endpoint():
+def test_api_dashboard_summary_endpoint(visiteur_headers):
     """Vérifie le point de terminaison REST /api/v1/dashboard/summary."""
-    response = client.get("/api/v1/dashboard/summary")
+    response = client.get("/api/v1/dashboard/summary", headers=visiteur_headers)
     assert response.status_code == 200
     data = response.json()
     assert "kpis" in data

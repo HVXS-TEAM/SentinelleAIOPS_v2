@@ -4,6 +4,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from typing import Generator
 from backend.app.core.config import settings
 
+import logging
+logger = logging.getLogger("sentinelle.db.session")
+
+
 # Arguments spécifiques pour SQLite (accès multi-threads concurrents sans blocage)
 is_sqlite = "sqlite" in settings.DATABASE_URL
 connect_args = {"check_same_thread": False, "timeout": 15} if is_sqlite else {}
@@ -25,8 +29,8 @@ if is_sqlite:
             cursor.execute("PRAGMA busy_timeout=5000;")
             cursor.execute("PRAGMA foreign_keys=ON;")
             cursor.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("_set_sqlite_pragma : repli après erreur : %s", exc)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

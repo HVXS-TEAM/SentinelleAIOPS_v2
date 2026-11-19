@@ -22,7 +22,11 @@ from backend.app.db.models import (
     EvenementSecurite,
     Alerte,
 )
-from backend.app.modules.netdevops.service import _audit_config, _SIMULATED_CONFIGS
+from backend.app.modules.netdevops.service import audit_stored_configs
+
+import logging
+logger = logging.getLogger("sentinelle.assistant.service")
+
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
@@ -231,7 +235,7 @@ class AssistantService:
                 "response": "\n".join(lines),
                 "sources": sources,
                 "suggested_followups": [
-                    "Comment simuler une surcharge de disque pour la démo BTS ?",
+                    "Quels équipements ont le plus faible temps avant saturation ?",
                     "Quelles alertes sont actuellement déclenchées ?",
                 ],
                 "mode": "rag_local",
@@ -256,7 +260,7 @@ class AssistantService:
                 "response": "\n".join(lines),
                 "sources": sources,
                 "suggested_followups": [
-                    "Simuler une attaque par force brute SSH",
+                    "Quelles IP ont échoué le plus de connexions SSH ?",
                     "Voir les alertes corrélées avec la supervision CPU",
                 ],
                 "mode": "rag_local",
@@ -265,14 +269,14 @@ class AssistantService:
         # 4. Conformité CIS / Cisco / NetDevOps
         if any(w in q_lower for w in ["cis", "cisco", "netdevops", "benchmark", "conformité", "conformite", "diff", "backup"]):
             sources.append("NetDevOps CIS")
-            cis_results = []
-            for dev_id, cfg in _SIMULATED_CONFIGS.items():
-                rep = _audit_config(dev_id, cfg)
-                cis_results.append((dev_id, rep["score"], len(rep["violations"])))
+            cis_results = [(r["id"], r["score"], r["violations"]) for r in audit_stored_configs()]
 
             cis_results.sort(key=lambda x: x[1])
             lines = ["### Audit de Conformité CIS Benchmark Cisco IOS\n"]
-            lines.append("Niveau de durcissement des équipements inventoriés :\n")
+            if not cis_results:
+                lines.append("Aucune configuration n'a encore été collectée : lancez un audit depuis NetDevOps.")
+            else:
+                lines.append("Niveau de durcissement d'après la dernière configuration collectée :\n")
             for dev, score, nb_viols in cis_results:
                 status_tag = "[CONFORME]" if score >= 80 else ("[ATTENTION]" if score >= 60 else "[NON-CONFORME]")
                 lines.append(f"- {status_tag} **{dev}** : **{score}%** de conformité ({nb_viols} écart(s))")
@@ -281,8 +285,8 @@ class AssistantService:
                 "response": "\n".join(lines),
                 "sources": sources,
                 "suggested_followups": [
-                    "Afficher le détail des violations sur le routeur Edge",
-                    "Lancer un audit CIS complet sur l'ensemble du lab",
+                    "Quelles sont les violations CIS les plus critiques ?",
+                    "Quel est l'état des sauvegardes de configuration ?",
                 ],
                 "mode": "rag_local",
             }
@@ -341,7 +345,7 @@ class AssistantService:
         """
         context = cls._build_system_context(db)
         system_prompt = (
-            "Tu es Sentinelle Assistant, un expert AIOps en supervision prédictive, administration réseau et cybersécurité pour le BTS SIO SISR. "
+            "Tu es Sentinelle Assistant, un expert AIOps en supervision prédictive, administration réseau et cybersécurité. "
             "Réponds de manière professionnelle, précise, concise et en français en t'appuyant STRICTEMENT sur le contexte suivant :\n\n"
             f"{context}\n\n"
             "Si la réponse nécessite des actions techniques, donne des commandes concrètes ou des étapes de remédiation. "
@@ -372,8 +376,9 @@ class AssistantService:
                             ],
                             "mode": "ollama",
                         }
-        except Exception:
+        except Exception as exc:
             # Ollama non joignable -> bascule automatique transparente sur le moteur RAG local
+            logger.info("LLM local indisponible : repli sur le moteur déterministe : %s", exc)
             pass
 
         fallback = cls._local_fallback_answer(message, db)

@@ -26,21 +26,6 @@ def test_health_score_calculation():
     db.close()
 
 
-def test_snmp_scan_and_rogue_device_detection():
-    """Vérifie la détection d'équipement non répertorié (Rogue Device) et la levée d'alerte."""
-    db = SessionLocal()
-    scan_res = ParcService.simulate_snmp_discovery(db, "192.168.1.0/24", inject_rogue=True)
-    assert scan_res["nouveaux_detectes"] == 1
-    assert scan_res["rogue_device"] is not None
-    assert scan_res["rogue_device"]["nom"] == "ROGUE-PI-01"
-
-    # Vérifier l'alerte CRITICAL associée
-    alert = db.query(Alerte).filter(Alerte.titre.like("%ROGUE-PI-01%")).first()
-    assert alert is not None
-    assert alert.severite == "CRITICAL"
-    db.close()
-
-
 def test_csv_export():
     """Vérifie la génération du rapport CSV d'inventaire."""
     db = SessionLocal()
@@ -185,50 +170,100 @@ def test_import_real_devices_api():
     client.delete(f"/api/v1/parc/equipements/{imported_id}", headers=headers)
 
 
-def test_ssh_execute_cisco_and_linux_cli():
-    """Vérifie le moteur CLI pour les commandes Cisco IOS et Linux."""
+def _faux_scan(monkeypatch, appareils):
+    """Remplace uniquement la collecte réseau (ping/ARP) : le rapprochement avec le parc reste réel."""
+    monkeypatch.setattr(
+        ParcService, "scan_real_network",
+        staticmethod(lambda db, ip_prefix=None: {"subnet": "198.51.100.0/24", "local_host": {}, "devices_count": len(appareils),
+                                               "devices": appareils, "scan_duration_ms": 1}),
+    )
+
+
+def test_decouverte_reseau_alerte_sur_equipement_non_repertorie(monkeypatch):
+    """Un équipement actif absent du parc lève une alerte CRITICAL (une seule), sans être ajouté au parc."""
+    inconnu = {"ip": "198.51.100.77", "mac": "AA:BB:CC:00:11:22", "hostname": "inconnu-77", "already_in_parc": False}
+    connu = {"ip": "192.168.1.1", "mac": None, "hostname": "SW-CORE-01", "already_in_parc": True}
+    _faux_scan(monkeypatch, [inconnu, connu])
+    db = SessionLocal()
+    try:
+        res = ParcService.discover_network(db, "198.51.100.0/24")
+        assert res["nouveaux_detectes"] == 1
+        assert res["rogue_device"]["ip"] == "198.51.100.77"
+        assert set(res["equipements_actifs"]) == {"198.51.100.77", "192.168.1.1"}
+        assert db.query(Equipement).filter(Equipement.ip == "198.51.100.77").first() is None
+
+        ParcService.discover_network(db, "198.51.100.0/24")  # second balayage : pas de doublon d'alerte
+        alertes = db.query(Alerte).filter(Alerte.titre.like("%198.51.100.77%"), Alerte.statut == "Active").all()
+        assert len(alertes) == 1 and alertes[0].severite == "CRITICAL"
+    finally:
+        db.close()
+
+
+def test_decouverte_reseau_sans_inconnu_ne_cree_aucune_alerte(monkeypatch):
+    _faux_scan(monkeypatch, [{"ip": "192.168.1.1", "mac": None, "hostname": "SW-CORE-01", "already_in_parc": True}])
+    db = SessionLocal()
+    try:
+        avant = db.query(Alerte).count()
+        res = ParcService.discover_network(db, "192.168.1.0/24")
+        assert res["nouveaux_detectes"] == 0 and res["rogue_device"] is None
+        assert db.query(Alerte).count() == avant
+    finally:
+        db.close()
+
+
+class _FauxSSH:
+    def __init__(self, panne=None):
+        self.panne = panne
+
+    def connect(self, **kw):
+        if self.panne:
+            raise self.panne
+
+    def exec_command(self, cmd, timeout=None):
+        import io
+        class _Flux(io.BytesIO):
+            class channel:
+                @staticmethod
+                def recv_exit_status():
+                    return 0
+        return None, _Flux(b"hostname SW-REEL\n"), _Flux(b"")
+
+    def close(self):
+        pass
+
+
+def test_terminal_equipement_distant_utilise_le_vrai_ssh(monkeypatch):
+    from backend.app.modules.parc import ssh_service
     from backend.app.modules.parc.ssh_service import SSHExecutionService
-
-    # 1. Cisco show run
-    res_run = SSHExecutionService.execute(ip="192.168.1.1", command="show run", device_name="SW-CORE-01")
-    assert res_run["exit_code"] == 0
-    assert "hostname SW-CORE-01" in res_run["output"]
-    assert "GigabitEthernet0/0" in res_run["output"]
-
-    # 2. Cisco show ip int brief
-    res_ip = SSHExecutionService.execute(ip="192.168.1.1", command="show ip int brief")
-    assert "GigabitEthernet0/0" in res_ip["output"]
-    assert "up" in res_ip["output"]
-
-    # 3. Linux df -h & uptime
-    res_df = SSHExecutionService.execute(ip="10.0.10.20", command="df -h", device_name="SRV-DB-01")
-    assert "/dev/sda1" in res_df["output"]
-
-    res_uptime = SSHExecutionService.execute(ip="10.0.10.20", command="uptime")
-    assert "load average" in res_uptime["output"]
-
-    # 4. Help
-    res_help = SSHExecutionService.execute(ip="10.0.10.20", command="help")
-    assert "Sentinelle AIOps Terminal" in res_help["output"]
+    monkeypatch.setattr(ssh_service, "new_ssh_client", lambda: _FauxSSH())
+    res = SSHExecutionService.execute(ip="198.51.100.10", command="show run", username="u", password="p", device_name="SW-REEL")
+    assert res["mode"] == "REAL_SSH" and res["exit_code"] == 0
+    assert "hostname SW-REEL" in res["output"]
 
 
-def test_ssh_execute_api_endpoint():
-    """Vérifie l'endpoint REST /parc/ssh/execute."""
-    token = get_auth_token("admin")
-    headers = {"Authorization": f"Bearer {token}"}
+def test_terminal_equipement_injoignable_renvoie_une_erreur_et_rien_d_invente(monkeypatch):
+    from backend.app.modules.parc import ssh_service
+    from backend.app.modules.parc.ssh_service import SSHExecutionService
+    monkeypatch.setattr(ssh_service, "new_ssh_client", lambda: _FauxSSH(panne=TimeoutError("timed out")))
+    res = SSHExecutionService.execute(ip="198.51.100.10", command="show version", device_name="SW-HS")
+    assert res["mode"] == "SSH_ERROR" and res["exit_code"] == 255
+    assert "Cisco IOS" not in res["output"] and "TimeoutError" in res["output"]
 
-    payload = {
-        "ip": "192.168.1.1",
-        "command": "show version",
-        "device_name": "RTR-TEST",
-    }
-    resp = client.post("/api/v1/parc/ssh/execute", json=payload, headers=headers)
+
+def test_terminal_hote_local_utilise_le_diagnostic_reel():
+    from backend.app.modules.parc.ssh_service import SSHExecutionService
+    res = SSHExecutionService.execute(ip="127.0.0.1", command="arp -a", device_name="HOTE")
+    assert res["mode"] == "REAL_HOST_PROBE"
+
+
+def test_terminal_endpoint_remonte_l_echec_ssh(monkeypatch):
+    from backend.app.modules.parc import ssh_service
+    monkeypatch.setattr(ssh_service, "new_ssh_client", lambda: _FauxSSH(panne=ConnectionRefusedError("refused")))
+    headers = {"Authorization": f"Bearer {get_auth_token('admin')}"}
+    resp = client.post("/api/v1/parc/ssh/execute", headers=headers,
+                       json={"ip": "198.51.100.10", "command": "show version", "device_name": "SW-HS"})
     assert resp.status_code == 200
-    data = resp.json()
-    assert "output" in data
-    assert "Cisco IOS" in data["output"]
-    assert data["exit_code"] == 0
-    assert "mode" in data
+    assert resp.json()["mode"] == "SSH_ERROR" and resp.json()["exit_code"] == 255
 
 
 

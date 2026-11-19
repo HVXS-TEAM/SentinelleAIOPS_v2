@@ -20,6 +20,39 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     identifiant: str
     mot_de_passe: str
+    code_mfa: Optional[str] = None  # code TOTP à 6 chiffres ou code de secours (si MFA activé)
+
+
+class MfaCodeRequest(BaseModel):
+    code: str
+
+
+class MfaDisableRequest(BaseModel):
+    mot_de_passe: str
+    code: str
+
+
+class SetupRequest(BaseModel):
+    identifiant: str
+    email: str
+    nom_complet: str
+    mot_de_passe: str
+    role: str = "Administrateur"  # profil du premier compte, choisi sur le nouveau poste
+
+
+class ForgotPasswordRequest(BaseModel):
+    identifiant: str  # identifiant ou adresse e-mail
+
+
+class ResetPasswordWithCodeRequest(BaseModel):
+    identifiant: str
+    code: str
+    nouveau_mot_de_passe: str
+
+
+class ChangePasswordRequest(BaseModel):
+    mot_de_passe_actuel: str
+    nouveau_mot_de_passe: str
 
 
 class RegisterRequest(BaseModel):

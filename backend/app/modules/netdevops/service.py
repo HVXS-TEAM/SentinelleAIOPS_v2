@@ -18,7 +18,6 @@ import json
 import os
 import re
 import socket
-import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -34,112 +33,19 @@ from backend.app.core.config import DATA_DIR, CIS_RULES_PATH, CONFIG_BACKUP_DIR
 from backend.app.db.session import SessionLocal
 from backend.app.db.models import Equipement, AuditReseau, SauvegardeConfig
 from backend.app.core.security import decrypt_secret
+from backend.app.core.ssh_trust import new_ssh_client, log_connection_failure
 from backend.app.core.audit import log_audit_action
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
+
+import logging
+logger = logging.getLogger("sentinelle.netdevops.service")
+
 
 _BASE_DIR = DATA_DIR
 _CIS_RULES_PATH = CIS_RULES_PATH
 _BACKUP_DIR = CONFIG_BACKUP_DIR
 _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-
-# ── Configurations initiales de référence (avant remédiation) ─────────────────
-
-_SIMULATED_CONFIGS: dict[str, str] = {
-    "SW-CORE-01": textwrap.dedent("""\
-        version 15.2
-        hostname SW-CORE-01
-        service password-encryption
-        enable secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0
-        !
-        ip ssh version 2
-        ip http secure-server
-        !
-        ntp server 192.168.1.1
-        service timestamps log datetime msec localtime show-timezone
-        logging host 192.168.1.254
-        logging trap informational
-        !
-        banner motd ^C Authorized access only. ^C
-        !
-        line vty 0 4
-         exec-timeout 10 0
-         transport input ssh
-         login local
-        !
-        no ip source-route
-        no ip http server
-        !
-        snmp-server community SNMP-BTS01 ro
-        !
-        interface GigabitEthernet0/1
-         no cdp enable
-         ip access-group ACL-WAN in
-        !
-        ip access-group ACL-WAN in
-        end
-    """),
-
-    "RTR-EDGE-01": textwrap.dedent("""\
-        version 15.4
-        hostname RTR-EDGE-01
-        enable password cisco123
-        !
-        line vty 0 4
-         transport input telnet
-        !
-        ip http server
-        snmp-server community public ro
-        snmp-server community private rw
-        !
-        interface GigabitEthernet0/0
-         cdp enable
-        !
-        end
-    """),
-
-    "FW-PERIMETER-01": textwrap.dedent("""\
-        version 9.8
-        hostname FW-PERIMETER-01
-        service password-encryption
-        enable secret 8 $8$dsJues.4IuoFpk$pWPsOO4UaV8WRO
-        !
-        ip ssh version 2
-        no ip http server
-        !
-        ntp server 10.0.0.1
-        ntp authenticate
-        service timestamps log datetime
-        logging host 10.0.0.254
-        logging trap informational
-        !
-        banner motd ^C Restricted – BTS SIO Lab ^C
-        !
-        line vty 0 4
-         exec-timeout 10 0
-         transport input ssh
-         login local
-        !
-        no ip source-route
-        no cdp enable
-        ip access-group ACL-PERIMETER in
-        end
-    """),
-
-    "AP-WIFI-01": textwrap.dedent("""\
-        version 12.4
-        hostname AP-WIFI-01
-        !
-        line vty 0 4
-         transport input telnet
-        !
-        ip http server
-        snmp-server community public ro
-        !
-        end
-    """),
-}
-
 
 def _load_cis_rules() -> list[dict[str, Any]]:
     """
@@ -209,7 +115,7 @@ def _audit_config(device_id: str, config: str) -> dict[str, Any]:
                 passed = False
                 fail_reason = f"Pattern attendu introuvable : '{rule['pattern']}'"
 
-        if "regex_forbidden" in rule and re.search(rule["regex_forbidden"], config, re.IGNORECASE):
+        if "regex_forbidden" in rule and re.search(rule["regex_forbidden"], config, re.IGNORECASE | re.MULTILINE):
             passed = False
             fail_reason = (
                 fail_reason + " | " if fail_reason else ""
@@ -229,6 +135,7 @@ def _audit_config(device_id: str, config: str) -> dict[str, Any]:
                     "fail_reason": fail_reason,
                     "snippet": _extract_relevant_snippet(config, rule),
                     "remediation": rule.get("remediation", ""),
+                    "remediation_commands": rule.get("remediation_commands", ""),
                 }
             )
 
@@ -302,8 +209,8 @@ def _save_backup(device_id: str, config: str, comment: str = "Audit automatique 
                         )
                     )
                     db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("Sauvegarde de configuration non enregistrée en base")
 
     return {
         "device_id": device_id,
@@ -364,93 +271,161 @@ def _diff_configs(device_id: str, index_a: int = 1, index_b: int = 0) -> dict[st
 # ── Récupération et Remédiation Réelle de Configuration ──────────────────────
 
 
-def _fetch_real_or_stored_config(device_id: str) -> Optional[str]:
-    """
-    Rôle : Récupère la configuration active d'un équipement :
-           1. Si une sauvegarde modifiée existe déjà dans _BACKUP_DIR, l'utilise (persistance des remédiations).
-           2. Si l'équipement existe dans SQLite et a le port 22 ouvert, tente de récupérer 'show running-config' en SSH.
-           3. Sinon, utilise la table SauvegardeConfig ou génère la configuration de base de l'équipement.
-    Entrées : Identifiant de l'équipement (device_id).
-    Sorties : Configuration texte ou None si l'équipement est totalement inconnu.
-    """
-    # 1. Vérifier si une configuration persistée existe déjà dans l'historique JSON (après remédiation)
+class ConfigUnavailableError(RuntimeError):
+    """La configuration réelle d'un équipement n'a pas pu être obtenue (injoignable, identifiants
+    absents, réponse inattendue) et aucune sauvegarde réelle n'existe. Jamais de configuration inventée."""
+
+
+def _eq_snapshot(device_id: str) -> Optional[dict[str, Any]]:
+    """Lit l'équipement en base (copie détachée de la session). None s'il est inconnu."""
+    with SessionLocal() as db:
+        eq = db.query(Equipement).filter(Equipement.nom == device_id).first()
+        if eq is None:
+            return None
+        return {"id": eq.id, "nom": eq.nom, "ip": eq.ip, "creds": eq.identifiants_chiffres}
+
+
+def _open_ssh(eq: dict[str, Any], timeout: float = 6.0):
+    """Ouvre une session SSH réelle vers l'équipement (clé d'hôte épinglée, voir ssh_trust)."""
+    if not eq.get("creds"):
+        raise ConfigUnavailableError(f"Aucun identifiant SSH enregistré pour {eq['nom']}.")
+    creds = decrypt_secret(eq["creds"])
+    user, pwd = creds.split(":", 1) if ":" in creds else ("admin", creds)
+    ssh = new_ssh_client()
+    try:
+        ssh.connect(eq["ip"], port=22, username=user, password=pwd, timeout=timeout,
+                    banner_timeout=timeout, auth_timeout=timeout, allow_agent=False, look_for_keys=False)
+    except Exception as exc:
+        log_connection_failure(eq["ip"], exc)
+        raise ConfigUnavailableError(f"Connexion SSH impossible vers {eq['nom']} ({eq['ip']}) : {type(exc).__name__}.") from exc
+    return ssh
+
+
+def _fetch_live_config(eq: dict[str, Any]) -> str:
+    """Récupère 'show running-config' en SSH sur l'équipement réel."""
+    ssh = _open_ssh(eq)
+    try:
+        _, stdout, _ = ssh.exec_command("show running-config", timeout=15.0)
+        cfg = stdout.read().decode("utf-8", errors="ignore").strip()
+    except Exception as exc:
+        log_connection_failure(eq["ip"], exc)
+        raise ConfigUnavailableError(f"Lecture de la configuration impossible sur {eq['nom']}.") from exc
+    finally:
+        ssh.close()
+    if len(cfg) < 40 or "hostname" not in cfg.lower():
+        raise ConfigUnavailableError(
+            f"Réponse inattendue de {eq['nom']} : ce n'est pas une configuration Cisco IOS lisible."
+        )
+    return cfg
+
+
+def _stored_config(device_id: str) -> Optional[tuple[str, str]]:
+    """Dernière configuration réellement collectée (SQLite puis historique JSON) : (config, horodatage)."""
+    with SessionLocal() as db:
+        eq = db.query(Equipement).filter(Equipement.nom == device_id).first()
+        if eq is not None:
+            last = (
+                db.query(SauvegardeConfig)
+                .filter(SauvegardeConfig.equipement_id == eq.id)
+                .order_by(SauvegardeConfig.date_sauvegarde.desc())
+                .first()
+            )
+            if last and last.contenu:
+                return last.contenu, last.date_sauvegarde.isoformat() if last.date_sauvegarde else ""
     bkp_path = _backup_path(device_id)
     if bkp_path.exists():
         try:
             history = json.loads(bkp_path.read_text(encoding="utf-8"))
             if history and history[0].get("config"):
-                return history[0]["config"]
-        except Exception:
-            pass
+                return history[0]["config"], history[0].get("ts", "")
+        except Exception as exc:
+            logger.warning("Historique des sauvegardes de configuration illisible : %s", exc)
+    return None
 
-    # 2. Rechercher l'équipement dans la base SQLite
+
+def _get_config_with_source(device_id: str) -> Optional[tuple[str, str]]:
+    """
+    Configuration d'un équipement et sa provenance :
+      - ("<config>", "live") : lue en SSH à l'instant ;
+      - ("<config>", "sauvegarde <horodatage>") : équipement injoignable, dernière sauvegarde réelle ;
+      - None : équipement inconnu du parc.
+    Lève ConfigUnavailableError si l'équipement existe mais qu'aucune configuration réelle n'est disponible.
+    """
+    eq = _eq_snapshot(device_id)
+    if eq is None:
+        return None
     try:
-        with SessionLocal() as db:
-            eq = db.query(Equipement).filter(Equipement.nom == device_id).first()
-            if eq:
-                # Tenter une récupération SSH réelle si le port 22 est ouvert
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.settimeout(0.5)
-                        if s.connect_ex((eq.ip, 22)) == 0 and eq.identifiants_chiffres:
-                            creds = decrypt_secret(eq.identifiants_chiffres)
-                            user, pwd = creds.split(":", 1) if ":" in creds else ("admin", creds)
-                            ssh = paramiko.SSHClient()
-                            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                            ssh.connect(eq.ip, port=22, username=user, password=pwd, timeout=2.0, allow_agent=False, look_for_keys=False)
-                            _, stdout, _ = ssh.exec_command("show running-config", timeout=3.0)
-                            live_cfg = stdout.read().decode("utf-8", errors="ignore").strip()
-                            ssh.close()
-                            if len(live_cfg) > 40 and "hostname" in live_cfg.lower():
-                                return live_cfg
-                except Exception:
-                    pass
+        return _fetch_live_config(eq), "live"
+    except ConfigUnavailableError as live_error:
+        stored = _stored_config(device_id)
+        if stored:
+            return stored[0], f"sauvegarde {stored[1]}"
+        raise live_error
 
-                # Vérifier si l'équipement est dans _SIMULATED_CONFIGS
-                if device_id in _SIMULATED_CONFIGS:
-                    return _SIMULATED_CONFIGS[device_id]
 
-                # Vérifier la table SauvegardeConfig SQLite
-                last_bkp = (
-                    db.query(SauvegardeConfig)
-                    .filter(SauvegardeConfig.equipement_id == eq.id)
-                    .order_by(SauvegardeConfig.date_sauvegarde.desc())
-                    .first()
-                )
-                if last_bkp and last_bkp.contenu:
-                    return last_bkp.contenu
+def _fetch_real_or_stored_config(device_id: str) -> Optional[str]:
+    """Configuration réelle (SSH, sinon dernière sauvegarde réelle). None si l'équipement est inconnu."""
+    result = _get_config_with_source(device_id)
+    return result[0] if result else None
 
-                # Générer une configuration initiale réaliste basée sur les propriétés réelles de l'équipement du parc
-                return textwrap.dedent(f"""\
-                    version 16.9
-                    hostname {eq.nom}
-                    ! Adresse IP de supervision : {eq.ip}
-                    service password-encryption
-                    enable secret 5 $1$Sentinelle$9xK2mP0qW4eR
-                    !
-                    ip ssh version 2
-                    no ip http server
-                    !
-                    ntp server 192.168.1.1
-                    service timestamps log datetime msec
-                    logging host 192.168.1.254
-                    !
-                    line vty 0 4
-                     exec-timeout 10 0
-                     transport input ssh
-                     login local
-                    !
-                    interface GigabitEthernet0/0
-                     ip address {eq.ip} 255.255.255.0
-                     no cdp enable
-                     ip access-group ACL-IN in
-                    !
-                    end
-                """)
-    except Exception:
-        pass
 
-    return _SIMULATED_CONFIGS.get(device_id)
+def _push_config_ios(eq: dict[str, Any], commands: str) -> str:
+    """Applique des commandes en mode configuration sur un équipement Cisco IOS (shell interactif),
+    puis 'write memory'. Lève ConfigUnavailableError si l'équipement rejette une commande."""
+    import time
+
+    ssh = _open_ssh(eq)
+    try:
+        chan = ssh.invoke_shell()
+        chan.settimeout(5.0)
+
+        def lire(attente: float = 0.6) -> str:
+            time.sleep(attente)
+            out = ""
+            while chan.recv_ready():
+                out += chan.recv(65535).decode("utf-8", errors="ignore")
+                time.sleep(0.1)
+            return out
+
+        lire(1.0)
+        chan.send("terminal length 0\n")
+        lire()
+        chan.send("configure terminal\n")
+        transcript = lire()
+        for line in [ln.strip() for ln in commands.splitlines() if ln.strip()]:
+            chan.send(line + "\n")
+            transcript += lire(0.3)
+        chan.send("end\n")
+        transcript += lire()
+        rejected = [ln for ln in transcript.splitlines() if ln.lstrip().startswith("% ")]
+        if rejected:
+            raise ConfigUnavailableError(
+                f"{eq['nom']} a rejeté une commande : {rejected[0].strip()[:120]}"
+            )
+        chan.send("write memory\n")
+        transcript += lire(2.0)
+        return transcript
+    except ConfigUnavailableError:
+        raise
+    except Exception as exc:
+        log_connection_failure(eq["ip"], exc)
+        raise ConfigUnavailableError(f"Application de la configuration impossible sur {eq['nom']}.") from exc
+    finally:
+        ssh.close()
+
+
+def audit_stored_configs() -> list[dict[str, Any]]:
+    """Audit CIS des dernières configurations réellement collectées (aucune connexion réseau)."""
+    results: list[dict[str, Any]] = []
+    with SessionLocal() as db:
+        noms = [e.nom for e in db.query(Equipement).order_by(Equipement.id.asc()).all()]
+    for nom in noms:
+        stored = _stored_config(nom)
+        if not stored:
+            continue
+        rep_ = _audit_config(nom, stored[0])
+        results.append({"id": nom, "score": rep_["score"], "violations": len(rep_["violations"]), "collected_at": stored[1]})
+    return results
 
 
 def _apply_remediation_to_config(current_config: str, remediation_script: str) -> str:
@@ -568,8 +543,8 @@ def _sync_audit_to_sqlite(device_id: str, report: dict[str, Any]) -> None:
             db.commit()
             from backend.app.modules.parc.service import ParcService
             ParcService.calculate_health_score(db, eq.id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("Synchronisation du rapport d'audit en base en échec")
 
 
 # ── Intégration Ollama LLM ────────────────────────────────────────────────────
@@ -613,7 +588,8 @@ async def _get_llm_recommendations(violations: list[dict[str, Any]], device_id: 
             response.raise_for_status()
             raw_text = response.json().get("response", "").strip()
             return _UNICODE_EMOJI_RE.sub("", raw_text).strip()
-    except Exception:
+    except Exception as exc:
+        logger.info("LLM local indisponible : recommandations locales utilisées : %s", exc)
         return _generate_local_recommendations(violations, device_id)
 
 
@@ -648,58 +624,41 @@ def _generate_local_recommendations(violations: list[dict[str, Any]], device_id:
 
 def get_available_devices() -> list[dict[str, Any]]:
     """
-    Rôle : Retourne la liste complète des équipements auditables en fusionnant les équipements réels
-           du parc SQLite et les gabarits réseau avec leur vrai score CIS calculé.
-    Entrées : Aucune.
-    Sorties : Liste de dictionnaires d'équipements avec id, name, type, ip, os, cis_score, findings.
+    Rôle : Liste les équipements du parc avec leur dernier score CIS réellement calculé.
+           Aucune connexion réseau : le score provient de la dernière configuration collectée ;
+           un équipement jamais audité a cis_score = None (aucune valeur inventée).
+    Sorties : Liste de dictionnaires id, name, type, ip, os, cis_score, findings, config_status.
     """
-    devices_map: dict[str, dict[str, Any]] = {}
-
-    # 1. Charger d'abord tous les équipements réels depuis la base SQLite
+    devices: list[dict[str, Any]] = []
     try:
         with SessionLocal() as db:
-            eqs = db.query(Equipement).order_by(Equipement.id.asc()).all()
-            for eq in eqs:
-                t_low = (eq.type or "").lower()
-                if "routeur" in t_low or "router" in t_low or "box" in t_low:
-                    dev_type = "router"
-                elif "firewall" in t_low or "pare-feu" in t_low:
-                    dev_type = "firewall"
-                else:
-                    dev_type = "switch"
+            eqs = [
+                (e.nom, e.ip, e.type, e.os)
+                for e in db.query(Equipement).order_by(Equipement.id.asc()).all()
+            ]
+    except Exception as exc:
+        logger.warning("Liste des équipements NetDevOps : lecture en base impossible : %s", exc)
+        return devices
 
-                cfg = _fetch_real_or_stored_config(eq.nom) or ""
-                rep = _audit_config(eq.nom, cfg) if cfg else {"score": 100.0, "failed_rules": 0}
-                devices_map[eq.nom] = {
-                    "id": eq.nom,
-                    "name": eq.nom,
-                    "type": dev_type,
-                    "ip": eq.ip,
-                    "os": eq.os or "Cisco IOS / Linux",
-                    "cis_score": rep["score"],
-                    "findings": rep["failed_rules"],
-                }
-    except Exception:
-        pass
-
-    # 2. Garantir la présence des 4 équipements de référence CIS (pour compatibilité tests et gabarits)
-    defaults = [
-        {"id": "SW-CORE-01", "name": "SW-CORE-01", "type": "switch", "ip": "192.168.1.1", "os": "IOS 15.2"},
-        {"id": "RTR-EDGE-01", "name": "RTR-EDGE-01", "type": "router", "ip": "192.168.1.254", "os": "IOS 15.4"},
-        {"id": "FW-PERIMETER-01", "name": "FW-PERIMETER-01", "type": "firewall", "ip": "10.0.0.254", "os": "ASA 9.8"},
-        {"id": "AP-WIFI-01", "name": "AP-WIFI-01", "type": "access_point", "ip": "10.0.20.1", "os": "IOS 12.4"},
-    ]
-    for d in defaults:
-        if d["id"] not in devices_map:
-            cfg = _fetch_real_or_stored_config(d["id"]) or _SIMULATED_CONFIGS[d["id"]]
-            rep = _audit_config(d["id"], cfg)
-            devices_map[d["id"]] = {
-                **d,
-                "cis_score": rep["score"],
-                "findings": rep["failed_rules"],
-            }
-
-    return list(devices_map.values())
+    for nom, ip, typ, os_ in eqs:
+        t_low = (typ or "").lower()
+        if "routeur" in t_low or "router" in t_low or "box" in t_low:
+            dev_type = "router"
+        elif "firewall" in t_low or "pare-feu" in t_low:
+            dev_type = "firewall"
+        else:
+            dev_type = "switch"
+        stored = _stored_config(nom)
+        if stored:
+            rep_ = _audit_config(nom, stored[0])
+            score, findings, status = rep_["score"], rep_["failed_rules"], f"collectée {stored[1]}"
+        else:
+            score, findings, status = None, None, "jamais auditée"
+        devices.append({
+            "id": nom, "name": nom, "type": dev_type, "ip": ip, "os": os_ or "",
+            "cis_score": score, "findings": findings, "config_status": status,
+        })
+    return devices
 
 
 async def run_audit(device_id: str) -> dict[str, Any]:
@@ -710,12 +669,15 @@ async def run_audit(device_id: str) -> dict[str, Any]:
     Sorties : Rapport d'audit CIS complet.
     Cas d'erreur : Lève ValueError si l'équipement n'existe ni en base ni dans les gabarits.
     """
-    config = _fetch_real_or_stored_config(device_id)
-    if config is None:
+    result = _get_config_with_source(device_id)
+    if result is None:
         raise ValueError(f"Équipement inconnu : {device_id}")
+    config, source = result
 
     report = _audit_config(device_id, config)
-    _save_backup(device_id, config, comment="Audit CIS Benchmark")
+    report["config_source"] = source
+    if source == "live":
+        _save_backup(device_id, config, comment="Audit CIS Benchmark")
     _sync_audit_to_sqlite(device_id, report)
     report["llm_recommendations"] = await _get_llm_recommendations(report["violations"], device_id)
 
@@ -744,26 +706,17 @@ async def remediate_device_config(
     if not _get_backups(device_id):
         _save_backup(device_id, current_config, comment="État initial avant remédiation")
 
-    ssh_mode = "CONFIG_PERSISTED"
-    try:
-        with SessionLocal() as db:
-            eq = db.query(Equipement).filter(Equipement.nom == device_id).first()
-            if eq:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.6)
-                    if s.connect_ex((eq.ip, 22)) == 0:
-                        creds = decrypt_secret(eq.identifiants_chiffres) if eq.identifiants_chiffres else "admin:admin"
-                        user, pwd = creds.split(":", 1) if ":" in creds else ("admin", creds)
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                        ssh.connect(eq.ip, port=22, username=user, password=pwd, timeout=2.5, allow_agent=False, look_for_keys=False)
-                        ssh.exec_command(remediation_commands, timeout=4.0)
-                        ssh.close()
-                        ssh_mode = "REAL_SSH_APPLIED"
-    except Exception:
-        pass
+    eq = _eq_snapshot(device_id)
+    if eq is None:
+        raise ValueError(f"Équipement inconnu : {device_id}")
+    # Application réelle sur l'équipement : sans succès, rien n'est modifié ni enregistré.
+    _push_config_ios(eq, remediation_commands)
+    ssh_mode = "REAL_SSH_APPLIED"
 
-    new_config = _apply_remediation_to_config(current_config, remediation_commands)
+    try:
+        new_config = _fetch_live_config(eq)  # relecture de la configuration réellement en place
+    except ConfigUnavailableError:
+        new_config = _apply_remediation_to_config(current_config, remediation_commands)
     bkp_info = _save_backup(
         device_id,
         new_config,
@@ -781,8 +734,8 @@ async def remediate_device_config(
                 cible=device_id,
                 details=f"Durcissement CIS appliqué ({finding_id or 'Custom'}) | Nouveau score: {new_report['score']}% | SHA-256: {bkp_info['sha256'][:12]}",
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("Journal d'audit NETDEVOPS_REMEDIATE non enregistré")
 
     diff_data = _diff_configs(device_id, index_a=1, index_b=0)
     return {
@@ -830,14 +783,17 @@ async def restore_device_backup(device_id: str, backup_index: int = 0) -> dict[s
                 cible=device_id,
                 details=f"Configuration restaurée (index #{backup_index}, SHA-256: {bkp_info['sha256'][:12]})",
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("Journal d'audit NETDEVOPS_RESTORE non enregistré")
 
     return {
         "device_id": device_id,
         "restored_from_ts": target_entry["ts"],
         "backup": bkp_info,
         "audit": report,
+        "deployed": False,
+        "note": "Configuration de référence réactivée dans Sentinelle. Son application sur l'équipement "
+                "reste à faire (copy / configure replace) : elle n'a pas été poussée automatiquement.",
     }
 
 

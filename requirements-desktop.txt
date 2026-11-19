@@ -1,0 +1,5 @@
+# Lanceur graphique (launcher.py) et compilation .exe : pip install -r requirements-desktop.txt
+-r requirements.txt
+PyQt6>=6.6,<7
+pyinstaller>=6.5,<7
+

@@ -2,12 +2,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Icon } from '../components/ui/Icon';
 import { securiteService, parcService } from '../services/api';
 import type { Equipement } from '../types';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-} from 'recharts';
+
+interface SecStats {
+  total_evenements: number;
+  total_anomalies: number;
+  attaques_critiques: number;
+  ips_bloquees: number;
+  modele_actif: string;
+  echantillons_baseline: number;
+  echantillons_requis: number;
+  evenements_par_source: Record<string, number>;
+  derniere_observation: string | null;
+  syslog_actif: boolean;
+  syslog_datagrammes_recus: number;
+  syslog_ignores_source_inconnue: number;
+}
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 interface Incident {
@@ -22,7 +31,8 @@ interface Incident {
   target: string;
   action: 'Investigate' | 'Blocked' | 'Review';
   details?: string;
-  anomalyScore?: number;
+  /** Score de l'Isolation Forest ; 0 = détection par règle statique uniquement. */
+  score: number;
 }
 
 const SEV_BADGE: Record<string, string> = {
@@ -37,19 +47,8 @@ export const SecuritePage: React.FC = () => {
   const [showIsolateDrawer, setShowIsolateDrawer] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [isSimulatingBrute, setIsSimulatingBrute] = useState(false);
   const [equipementsList, setEquipementsList] = useState<Equipement[]>([]);
-  const [secStats, setSecStats] = useState<{
-    total_events: number;
-    anomalies_detectees: number;
-    critical_threats: number;
-    blocked_ips_count: number;
-  }>({
-    total_events: 0,
-    anomalies_detectees: 0,
-    critical_threats: 0,
-    blocked_ips_count: 0,
-  });
+  const [secStats, setSecStats] = useState<SecStats | null>(null);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -68,17 +67,12 @@ export const SecuritePage: React.FC = () => {
         setEquipementsList(eqs);
       }
       if (stats) {
-        setSecStats({
-          total_events: stats.total_events ?? 0,
-          anomalies_detectees: stats.anomalies_detectees ?? 0,
-          critical_threats: stats.critical_threats ?? 0,
-          blocked_ips_count: stats.blocked_ips_count ?? 0,
-        });
+        setSecStats(stats as SecStats);
       }
 
       if (events && Array.isArray(events)) {
         const mapped: Incident[] = events.map((e: any) => {
-          const isBlocked = String(e.type_evenement || '').includes('BLOQUÉE');
+          const isBlocked = String(e.explication || '').startsWith('[BLOQUÉ]');
           const sev: 'CRITICAL' | 'HIGH' | 'MEDIUM' =
             e.severite === 'CRITICAL' ? 'CRITICAL' : e.severite === 'HIGH' ? 'HIGH' : 'MEDIUM';
           return {
@@ -100,16 +94,14 @@ export const SecuritePage: React.FC = () => {
             action: isBlocked ? 'Blocked' : sev === 'CRITICAL' ? 'Investigate' : 'Review',
             details:
               e.explication ||
-              `Fréquence mesurée : ${e.tentatives_minute}/min. Score Isolation Forest : ${Math.round(
-                Math.abs(e.score_anomalie ?? 0.25) * 100,
-              )}/100.`,
-            anomalyScore: Math.min(99, Math.max(15, Math.round(Math.abs(e.score_anomalie ?? 0.25) * 100 + (e.is_anomaly ? 50 : 0)))),
+              `Fréquence mesurée : ${e.tentatives_minute}/min.`,
+            score: typeof e.score_anomalie === 'number' ? e.score_anomalie : 0,
           };
         });
         setIncidents(mapped);
       }
     } catch {
-      // Tolérance réseau
+      showToast('Impossible de charger les données de sécurité : le serveur ne répond pas.');
     }
   }, []);
 
@@ -119,32 +111,22 @@ export const SecuritePage: React.FC = () => {
 
   const handleFullScan = async () => {
     setIsScanning(true);
-    showToast('Scan réel des journaux Windows EventLog / Linux auth.log et sockets réseau...');
+    showToast('Lecture des journaux d\'authentification de l\'hôte...');
     try {
       const scanRes = await securiteService.scanRealSecurity();
       await loadSecurityData();
-      showToast(
-        `Scan terminé : ${scanRes?.events_collected ?? 0} flux système analysés par Isolation Forest (${scanRes?.anomalies_detected ?? 0} anomalie(s)).`,
-      );
+      if (scanRes?.aucune_source_lisible) {
+        const raison = (scanRes?.sources ?? []).map((x: any) => `${x.source} : ${x.detail}`).join(' ; ');
+        showToast(`Aucun journal d'authentification lisible sur l'hôte (${raison || 'aucune source'}).`);
+      } else {
+        showToast(
+          `Scan terminé : ${scanRes?.nouveaux_evenements ?? 0} nouvel(s) événement(s), ${scanRes?.evenements_analyses ?? 0} analysé(s), ${scanRes?.anomalies_detectees ?? 0} anomalie(s).`,
+        );
+      }
     } catch {
       showToast('Erreur lors du scan de sécurité.');
     } finally {
       setIsScanning(false);
-    }
-  };
-
-  const handleSimulateBruteforce = async () => {
-    setIsSimulatingBrute(true);
-    showToast("Injection d'un flux Brute Force SSH et analyse par le modèle Isolation Forest...");
-    try {
-      const targetEqId = equipementsList[0]?.id ?? 1;
-      await securiteService.simulateBruteforce(targetEqId, '198.51.100.45');
-      await loadSecurityData();
-      showToast("Flux d'attaque détecté et classifié CRITICAL par l'Isolation Forest !");
-    } catch {
-      showToast("Erreur lors de l'injection du test Brute Force.");
-    } finally {
-      setIsSimulatingBrute(false);
     }
   };
 
@@ -154,26 +136,27 @@ export const SecuritePage: React.FC = () => {
     try {
       const res = await securiteService.blockIp(
         ipToBlock,
-        inc.equipementId,
+        inc.dbId,
         `Blocage SOC suite à ${inc.type}`,
       );
       await loadSecurityData();
       setSelectedIncident(prev => (prev && prev.id === inc.id ? { ...prev, action: 'Blocked' } : prev));
-      showToast(res?.message || `IP ${ipToBlock} bloquée avec succès (${res?.firewall_mode || 'FIREWALL'}).`);
-    } catch {
-      showToast(`Erreur lors du blocage de ${ipToBlock}.`);
+      showToast(res?.message || `IP ${ipToBlock} bloquée (${res?.firewall_mode || 'pare-feu'}).`);
+    } catch (err: any) {
+      const d = err?.response?.data?.detail;
+      showToast(typeof d === 'string' ? d : `Blocage de ${ipToBlock} impossible.`);
     }
   };
 
   const handleIsolateEquipment = async (eq: Equipement) => {
-    showToast(`Mise en quarantaine (VLAN 999) de ${eq.nom} (${eq.ip})...`);
+    showToast(`Marquage en quarantaine de ${eq.nom} (${eq.ip})...`);
     try {
-      const res = await securiteService.isolateDevice(eq.id, 'Isolation manuelle SOC');
+      const res = await securiteService.isolateDevice(eq.id, eq.nom, 'Isolation manuelle SOC');
       setShowIsolateDrawer(false);
       await loadSecurityData();
-      showToast(res?.message || `Équipement ${eq.nom} isolé en quarantaine.`);
+      showToast(res?.message || `${eq.nom} marqué en quarantaine (aucune action réseau).`);
     } catch {
-      showToast(`Erreur lors de l'isolation de ${eq.nom}.`);
+      showToast(`Marquage en quarantaine de ${eq.nom} impossible.`);
     }
   };
 
@@ -197,19 +180,10 @@ export const SecuritePage: React.FC = () => {
             Sécurité Overview
           </h1>
           <p className="text-sm text-[#87938e] mt-0.5">
-            Détection d'anomalies temps réel (Isolation Forest), EventLog Windows &amp; Pare-feu actif.
+            Détection d'intrusion sur journaux d'authentification réels (hôte, syslog des équipements) &amp; pare-feu.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            id="securite-simulate-bruteforce-btn"
-            onClick={handleSimulateBruteforce}
-            disabled={isSimulatingBrute}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[#ffb4ab]/60 bg-[#1d2022] hover:bg-[#272a2d] text-xs font-mono font-bold text-[#ffb4ab] transition-colors cursor-pointer"
-          >
-            <Icon name="bolt" size="xs" className={`text-[#ffb4ab] ${isSimulatingBrute ? 'animate-bounce' : ''}`} />
-            <span>{isSimulatingBrute ? 'INJECTION...' : 'TEST BRUTE FORCE'}</span>
-          </button>
           <button
             id="securite-isolate-btn"
             onClick={() => setShowIsolateDrawer(true)}
@@ -309,106 +283,104 @@ export const SecuritePage: React.FC = () => {
           <div className="grid grid-cols-3 gap-3.5 mt-5">
             <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-3.5">
               <span className="text-[10px] font-mono tracking-widest text-[#87938e] uppercase block">
-                ACTIVE VECTORS
+                ANOMALIES
               </span>
               <span className="text-2xl font-bold font-mono text-[#ffb4ab] mt-1 block">
-                {secStats.anomalies_detectees}
+                {secStats?.total_anomalies ?? 0}
               </span>
             </div>
             <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-3.5">
               <span className="text-[10px] font-mono tracking-widest text-[#87938e] uppercase block">
-                EVENTS ANALYZED
+                ÉVÉNEMENTS LUS
               </span>
               <span className="text-2xl font-bold font-mono text-[#78d8ba] mt-1 block">
-                {secStats.total_events}
+                {secStats?.total_evenements ?? 0}
               </span>
             </div>
             <div className="bg-[#161c22] border border-[#272a2d] rounded-xl p-3.5">
               <span className="text-[10px] font-mono tracking-widest text-[#87938e] uppercase block">
-                IPS BLOCKED
+                IP BLOQUÉES
               </span>
               <span className="text-2xl font-bold font-mono text-[#81d0f8] mt-1 block">
-                {secStats.blocked_ips_count}
+                {secStats?.ips_bloquees ?? 0}
               </span>
             </div>
           </div>
         </div>
 
-        {/* ── Colonne Droite (5 cols) : SECURITY BENCHMARKS ─────────────────── */}
+        {/* ── Colonne Droite (5 cols) : sources et moteur de détection (données réelles) ── */}
         <div className="lg:col-span-5 bg-[#1d2022] border border-[#3e4945]/60 rounded-xl p-5 flex flex-col justify-between">
           <div>
-            <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-2">
+            <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#e0e3e6] uppercase tracking-wider mb-4">
               <Icon name="security" size="sm" className="text-[#78d8ba]" />
-              SECURITY BENCHMARKS
+              SOURCES &amp; MOTEUR DE DÉTECTION
             </div>
-
-            <div className="h-44 relative flex items-center justify-center my-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={[
-                      { name: 'Compliant', value: 85, color: '#78d8ba' },
-                      { name: 'Non-compliant', value: 15, color: '#272a2d' },
-                    ]}
-                    dataKey="value"
-                    innerRadius={55}
-                    outerRadius={75}
-                    startAngle={90}
-                    endAngle={-270}
-                    strokeWidth={0}
-                  >
-                    <Cell fill="#78d8ba" />
-                    <Cell fill="#272a2d" />
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-3xl font-bold font-mono text-[#e0e3e6]">
-                  85%
-                </span>
-                <span className="text-[10px] font-mono font-bold text-[#78d8ba] uppercase tracking-wider mt-0.5">
-                  RGPD &amp; CIS READY
-                </span>
+            {!secStats ? (
+              <p className="text-xs text-[#87938e] font-sans" data-testid="securite-stats-unavailable">
+                Statistiques indisponibles.
+              </p>
+            ) : (
+              <div className="space-y-4 text-xs font-mono" data-testid="securite-engine-panel">
+                <div className="flex justify-between">
+                  <span className="text-[#87938e]">Modèle actif</span>
+                  <span className="text-[#e0e3e6] font-bold">
+                    {secStats.modele_actif === 'regles_statiques' ? 'Règles statiques' : 'Isolation Forest + règles'}
+                  </span>
+                </div>
+                <div>
+                  <div className="flex justify-between mb-1.5">
+                    <span className="text-[#87938e]">Historique d'apprentissage</span>
+                    <span className="text-[#e0e3e6] font-bold">
+                      {secStats.echantillons_baseline} / {secStats.echantillons_requis}
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#78d8ba] rounded-full"
+                      style={{
+                        width: `${Math.min(100, secStats.echantillons_requis > 0 ? (secStats.echantillons_baseline / secStats.echantillons_requis) * 100 : 0)}%`,
+                      }}
+                    />
+                  </div>
+                  {secStats.modele_actif === 'regles_statiques' && (
+                    <p className="text-[10px] text-[#87938e] mt-1.5 font-sans">
+                      L'Isolation Forest s'active quand assez d'observations réelles sont collectées.
+                    </p>
+                  )}
+                </div>
+                <div className="pt-3 border-t border-[#272a2d] space-y-2">
+                  <div className="text-[10px] text-[#87938e] uppercase font-bold">Événements par source</div>
+                  {Object.keys(secStats.evenements_par_source).length === 0 ? (
+                    <p className="text-[11px] text-[#87938e] font-sans">
+                      Aucun événement d'authentification collecté. Lancez un scan ou activez le récepteur syslog.
+                    </p>
+                  ) : (
+                    Object.entries(secStats.evenements_par_source).map(([src, n]) => (
+                      <div key={src} className="flex justify-between">
+                        <span className="text-[#bdc9c3]">{src}</span>
+                        <span className="text-[#e0e3e6] font-bold">{n}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="pt-3 border-t border-[#272a2d] space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-[#87938e]">Récepteur syslog</span>
+                    <span className={secStats.syslog_actif ? 'text-[#78d8ba] font-bold' : 'text-[#87938e]'}>
+                      {secStats.syslog_actif ? `actif (${secStats.syslog_datagrammes_recus} reçus)` : 'désactivé'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#87938e]">Dernière observation</span>
+                    <span className="text-[#e0e3e6]">
+                      {secStats.derniere_observation
+                        ? new Date(secStats.derniere_observation + 'Z').toLocaleString('fr-FR')
+                        : 'aucune'}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-
-            <div className="space-y-4 pt-3 border-t border-[#272a2d] text-xs font-mono">
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Identity &amp; Access (Bcrypt / MFA)</span>
-                  <span className="font-bold text-[#e0e3e6]">95%</span>
-                </div>
-                <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#78d8ba] rounded-full" style={{ width: '95%' }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Network Hardening (CIS Level 1)</span>
-                  <span className="font-bold text-[#ffb4ab]">72%</span>
-                </div>
-                <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#ffb4ab] rounded-full" style={{ width: '72%' }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[#bdc9c3]">Data Protection (Fernet &amp; IP Anonymization)</span>
-                  <span className="font-bold text-[#81d0f8]">100%</span>
-                </div>
-                <div className="w-full bg-[#161c22] h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#81d0f8] rounded-full" style={{ width: '100%' }} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 text-right">
-            <span className="text-[11px] font-mono text-[#87938e]">
-              Moteur ML : Isolation Forest (Scikit-Learn)
-            </span>
+            )}
           </div>
         </div>
       </div>
@@ -520,16 +492,19 @@ export const SecuritePage: React.FC = () => {
                     <span className="text-[#e0e3e6]">{selectedIncident.target}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-[#87938e]">Score Isolation Forest :</span>
-                    <span className="text-[#ffb4ab] font-bold">{selectedIncident.anomalyScore ?? 92}/100</span>
+                    <span className="text-[#87938e]">Méthode :</span>
+                    <span className="text-[#ffb4ab] font-bold">
+                      {selectedIncident.score > 0 ? `Isolation Forest (score ${selectedIncident.score.toFixed(2)})` : 'Règle statique'}
+                    </span>
                   </div>
                 </div>
 
                 <div className="p-3.5 bg-[#1d2022] rounded-xl border border-[#272a2d] space-y-2">
-                  <div className="text-[10px] text-[#87938e] uppercase font-bold">Règle Pare-feu Windows / Linux</div>
-                  <code className="text-[11px] block bg-[#0b0f11] p-2 rounded text-[#78d8ba]">
-                    netsh advfirewall firewall add rule name="Sentinelle_Block_{(selectedIncident.rawIp || selectedIncident.sourceIp).split(' ')[0]}" dir=in action=block remoteip={(selectedIncident.rawIp || selectedIncident.sourceIp).split(' ')[0]}
-                  </code>
+                  <div className="text-[10px] text-[#87938e] uppercase font-bold">Blocage pare-feu</div>
+                  <p className="text-[11px] text-[#bdc9c3] font-sans leading-relaxed">
+                    Crée une règle de blocage entrant sur l'hôte de Sentinelle (netsh sous Windows, iptables sous Linux).
+                    Si les droits sont insuffisants, aucune règle n'est créée et le serveur l'indique.
+                  </p>
                 </div>
               </div>
             </div>
@@ -576,7 +551,7 @@ export const SecuritePage: React.FC = () => {
 
               <div className="mt-5 space-y-4 font-mono text-xs">
                 <p className="text-xs text-[#bdc9c3]">
-                  Sélectionnez l'équipement du parc à basculer immédiatement dans le groupe de quarantaine (VLAN 999).
+                  Sélectionnez l'équipement à marquer « Quarantaine SOC » dans Sentinelle. Aucune action réseau n'est exécutée : l'isolement effectif (VLAN, ACL, port) reste à faire sur l'équipement.
                 </p>
 
                 <div className="space-y-2">

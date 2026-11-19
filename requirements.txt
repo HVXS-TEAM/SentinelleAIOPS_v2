@@ -1,0 +1,41 @@
+# ==============================================================================
+# Sentinelle AIOps v2 — Dépendances d'exécution du backend (API FastAPI)
+#   pip install -r requirements.txt
+# Chaque ligne correspond à un import réel du code ; bornes hautes = prochaine
+# version majeure (non testée). Testé avec Python 3.13.
+#   Tests          : pip install -r requirements-dev.txt
+#   Lanceur bureau : pip install -r requirements-desktop.txt
+# ==============================================================================
+
+# API & serveur ASGI
+fastapi>=0.115,<1
+uvicorn[standard]>=0.28,<1
+python-multipart>=0.0.9,<1      # requis par OAuth2PasswordRequestForm (/auth/login-form)
+pydantic>=2.6,<3
+pydantic-settings>=2.2,<3
+
+# Base de données
+sqlalchemy>=2.0.28,<3
+
+# Sécurité : JWT, hachage des mots de passe, chiffrement des secrets
+python-jose[cryptography]>=3.3,<4
+bcrypt>=4.0,<6
+cryptography>=42,<51
+
+# IA / Machine Learning (Isolation Forest, prédiction TTF)
+scikit-learn>=1.4,<2
+numpy>=1.26,<3
+
+# Collecte, réseau et NetDevOps
+psutil>=5.9.8,<8
+paramiko>=3.4,<6                # SSH vers les équipements
+pyotp>=2.9,<3                   # second facteur TOTP (RFC 6238)
+pyyaml>=6.0.1,<7                # règles CIS (backend/config/cis_rules.yaml)
+httpx>=0.27,<1                  # Ollama, Telegram, Discord
+
+# Tâches de fond
+apscheduler>=3.10.4,<4          # API 3.x ; la 4.x est incompatible
+
+# Rapports PDF
+reportlab>=4.0,<6
+

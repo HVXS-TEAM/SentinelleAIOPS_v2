@@ -19,6 +19,7 @@ import socket
 import subprocess
 import sys
 import threading
+import json
 import time
 import urllib.request
 from pathlib import Path
@@ -366,7 +367,7 @@ class SentinelleLauncherWindow(QWidget):
         header_layout.addWidget(title_lbl)
         header_layout.addStretch()
 
-        version_badge = QLabel("v2.4.1 — BUILD CERTIFIÉ BTS SIO SISR")
+        version_badge = QLabel("v2.4.1")
         version_badge.setStyleSheet("color: #8b9792; background-color: #14181b; border: 1px solid #252c32; border-radius: 4px; padding: 3px 8px; font-family: 'Consolas', monospace; font-size: 10px;")
         header_layout.addWidget(version_badge)
 
@@ -588,14 +589,14 @@ class SentinelleLauncherWindow(QWidget):
                 api_online = False
                 for _ in range(60):
                     try:
-                        with urllib.request.urlopen(f"{APP_URL}/api/v1/health", timeout=0.6) as resp:
-                            if resp.status == 200:
-                                with urllib.request.urlopen(f"{APP_URL}/api/v1/admin/users", timeout=0.8) as db_resp:
-                                    if db_resp.status == 200:
-                                        api_online = True
-                                        break
+                        with urllib.request.urlopen(f"{APP_URL}/api/v1/health", timeout=0.8) as resp:
+                            body = json.loads(resp.read().decode("utf-8"))
+                            if resp.status == 200 and body.get("database") == "ok":
+                                api_online = True
+                                break
                     except Exception:
-                        time.sleep(0.15)
+                        pass
+                    time.sleep(0.15)
 
                 if not api_online:
                     raise RuntimeError(f"Le serveur API/SQLite sur {APP_URL} n'a pas pu démarrer.")

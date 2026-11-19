@@ -15,9 +15,24 @@ build/
 .coverage
 htmlcov/
 
+# Secrets générés localement (clés JWT / Fernet) et configuration locale
+.sentinelle_secrets.json
+.env
+backend/.env
+
 # Database
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite3
+
+# Données générées à l'exécution (sauvegardes PRA, sauvegardes de configuration, notifications)
+/backup/
+/notification_settings.json
+/ssh_known_hosts
+/logs/
+backend/data/
 
 # Node / Frontend
 node_modules/

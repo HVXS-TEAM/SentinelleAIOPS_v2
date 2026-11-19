@@ -29,6 +29,10 @@ from backend.app.core.audit import log_audit_action
 from backend.app.db.models import User
 
 
+import logging
+logger = logging.getLogger("sentinelle.admin.notifications")
+
+
 class NotificationService:
     @staticmethod
     def test_discord(
@@ -59,7 +63,7 @@ class NotificationService:
                         {"name": "Sévérité", "value": "INFO / TEST", "inline": True},
                         {"name": "Horodatage", "value": now_str, "inline": False},
                     ],
-                    "footer": {"text": "Système de Continuité & AIOps • BTS SIO SISR"},
+                    "footer": {"text": "Système de Continuité & AIOps"},
                 }
             ],
         }
@@ -88,6 +92,7 @@ class NotificationService:
                 details=str(exc),
             )
         except Exception as exc:
+            logger.warning("Test Discord en échec : %s", type(exc).__name__)
             return NotificationTestResponse(
                 success=False,
                 channel="discord",
@@ -164,6 +169,7 @@ class NotificationService:
                 details=str(exc),
             )
         except Exception as exc:
+            logger.warning("Test Telegram en échec : %s", type(exc).__name__)
             return NotificationTestResponse(
                 success=False,
                 channel="telegram",
@@ -198,8 +204,7 @@ class NotificationService:
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
             <p style="font-size: 11px; color: #64748b;">
               <b>Serveur SMTP :</b> {config.smtp_server}:{config.smtp_port}<br/>
-              <b>Horodatage :</b> {now_str}<br/>
-              <b>Environnement :</b> BTS SIO SISR
+              <b>Horodatage :</b> {now_str}
             </p>
           </div>
         </body>
@@ -235,6 +240,7 @@ class NotificationService:
                 details=str(exc),
             )
         except Exception as exc:
+            logger.warning("Test SMTP en échec : %s", type(exc).__name__)
             return NotificationTestResponse(
                 success=False,
                 channel="email",

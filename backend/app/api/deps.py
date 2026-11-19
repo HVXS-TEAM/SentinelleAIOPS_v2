@@ -13,6 +13,10 @@ from backend.app.schemas.auth import TokenData
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login-form")
 
+# Groupes de rôles RBAC réutilisables (conformes à la matrice du README)
+ROLES_ADMIN: List[str] = ["Administrateur"]
+ROLES_OPERATEURS: List[str] = ["Administrateur", "Technicien"]
+
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),

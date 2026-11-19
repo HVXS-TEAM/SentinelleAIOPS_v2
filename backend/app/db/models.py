@@ -35,7 +35,7 @@ class User(Base):
     hash_mot_de_passe = Column(String(255), nullable=False)
     role = Column(String(20), default="Technicien", nullable=False)  # Administrateur, Technicien, Visiteur
     mfa_active = Column(Boolean, default=False, nullable=False)
-    mfa_secret = Column(String(64), nullable=True)
+    mfa_secret = Column(Text, nullable=True)  # JSON chiffré Fernet (secret TOTP, codes de secours)
     est_actif = Column(Boolean, default=True, nullable=False)
     date_creation = Column(DateTime, default=utc_now, nullable=False)
     derniere_connexion = Column(DateTime, nullable=True)
@@ -124,6 +124,26 @@ class EvenementSecurite(Base):
     horodatage = Column(DateTime, default=utc_now, nullable=False, index=True)
 
 
+class JournalAuthentification(Base):
+    """Événement d'authentification réellement observé (journal hôte, EventLog Windows, syslog d'équipement).
+
+    Seule source de la détection : aucune ligne n'est jamais fabriquée. `empreinte` (SHA-256 de
+    l'horodatage, de l'IP, du compte, du résultat et de l'origine) évite de compter deux fois la
+    même ligne lorsqu'un journal est relu.
+    """
+    __tablename__ = "journal_authentifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    empreinte = Column(String(64), unique=True, nullable=False)
+    horodatage = Column(DateTime, nullable=False, index=True)
+    source_ip = Column(String(45), nullable=False, index=True)
+    utilisateur = Column(String(80), nullable=True)
+    succes = Column(Boolean, nullable=False)
+    utilisateur_invalide = Column(Boolean, default=False, nullable=False)
+    origine = Column(String(30), nullable=False)  # linux_authlog, journald, windows_eventlog, syslog
+    equipement_id = Column(Integer, ForeignKey("equipements.id", ondelete="SET NULL"), nullable=True)
+
+
 class AuditReseau(Base):
     __tablename__ = "audits_reseau"
 
@@ -185,3 +205,17 @@ class JournalAudit(Base):
     horodatage = Column(DateTime, default=utc_now, nullable=False, index=True)
 
     utilisateur = relationship("User", back_populates="actions_audit")
+
+
+class JetonReinitialisation(Base):
+    """Jeton à usage unique de réinitialisation de mot de passe (seule l'empreinte SHA-256 est stockée)."""
+    __tablename__ = "jetons_reinitialisation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    utilisateur_id = Column(Integer, ForeignKey("utilisateurs.id", ondelete="CASCADE"), index=True, nullable=False)
+    empreinte = Column(String(64), nullable=False, index=True)
+    origine = Column(String(10), nullable=False)  # "email" ou "admin"
+    date_creation = Column(DateTime, default=utc_now, nullable=False)
+    expire_le = Column(DateTime, nullable=False)
+    utilise_le = Column(DateTime, nullable=True)
+    tentatives = Column(Integer, default=0, nullable=False)

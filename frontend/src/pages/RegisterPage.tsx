@@ -3,55 +3,28 @@ import { Icon } from '../components/ui/Icon';
 import { authService } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 import type { AuthenticatedUser } from './LoginPage';
+import { RoleChoice, type Profil } from '../components/auth/RoleChoice';
 
 interface RegisterPageProps {
   onRegisterSuccess: (user: AuthenticatedUser) => void;
   onSwitchToLogin: () => void;
+  /** Profils proposés par le serveur (setup-status). Plusieurs profils = création depuis le poste local. */
+  rolesDisponibles?: string[];
 }
 
 type UserRole = 'Administrateur' | 'Technicien' | 'Visiteur';
 
-interface RoleOption {
-  id: UserRole;
-  title: string;
-  subtitle: string;
-  iconName: string;
-  badge: string;
-}
-
-const ROLE_OPTIONS: RoleOption[] = [
-  {
-    id: 'Administrateur',
-    title: 'Administrateur',
-    subtitle: 'Accès complet, PRA & gestion des comptes',
-    iconName: 'shield',
-    badge: 'Contrôle Total',
-  },
-  {
-    id: 'Technicien',
-    title: 'Technicien N2/N3',
-    subtitle: 'Supervision live, scans SNMP & audits CIS',
-    iconName: 'build',
-    badge: 'Opérationnel',
-  },
-  {
-    id: 'Visiteur',
-    title: 'Visiteur',
-    subtitle: 'Consultation lecture seule & indicateurs',
-    iconName: 'monitoring',
-    badge: 'Lecture seule',
-  },
-];
-
 export const RegisterPage: React.FC<RegisterPageProps> = ({
   onRegisterSuccess,
   onSwitchToLogin,
+  rolesDisponibles = ['Visiteur'],
 }) => {
+  const choixProfil = rolesDisponibles.length > 1;
+  const [role, setRole] = useState<Profil>('Visiteur');
   const { activeTheme, preference, currentHour, cycleTheme } = useTheme();
   const [identifiant, setIdentifiant] = useState('');
   const [nomComplet, setNomComplet] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<UserRole>('Technicien');
   const [motDePasse, setMotDePasse] = useState('');
   const [confirmationPasse, setConfirmationPasse] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -105,8 +78,10 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
 
     if (!motDePasse) {
       errors.motDePasse = 'Le mot de passe ne peut pas être vide.';
-    } else if (motDePasse.length < 6) {
-      errors.motDePasse = 'Le mot de passe doit comporter au moins 6 caractères.';
+    } else if (motDePasse.length < 12) {
+      errors.motDePasse = 'Le mot de passe doit comporter au moins 12 caractères.';
+    } else if (!/[A-Za-z]/.test(motDePasse) || !/[0-9]/.test(motDePasse)) {
+      errors.motDePasse = 'Le mot de passe doit contenir des lettres et des chiffres.';
     }
 
     if (motDePasse !== confirmationPasse) {
@@ -128,7 +103,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
         nom_complet: trimmedNom,
         email: trimmedEmail,
         mot_de_passe: motDePasse,
-        role: role,
+        ...(choixProfil ? { role } : {}),
       });
 
       const user: AuthenticatedUser = {
@@ -250,56 +225,24 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
 
         {/* Formulaire d'inscription avec validation JavaScript personnalisée (sans infobulles natives) */}
         <form onSubmit={handleSubmit} noValidate className="w-full space-y-4 text-xs">
-          {/* 1. Sélection du Profil / Rôle */}
-          <div className="space-y-1.5">
-            <label className="block font-mono text-[11px] font-semibold text-[#b9cac2] uppercase tracking-wider">
-              1. CHOISIR VOTRE PROFIL & RÔLE
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {ROLE_OPTIONS.map((opt) => {
-                const isSelected = role === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setRole(opt.id)}
-                    className={`p-3 rounded-xl border text-left transition-all duration-200 cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-[#00f2c3]/15 border-[#00f2c3] shadow-[0_0_12px_rgba(0,242,195,0.25)] text-[#dae3ee]'
-                        : 'bg-[#1c242c] border-[#3a4a44]/60 hover:border-[#b9cac2]/40 text-[#b9cac2]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div
-                        className={`p-1.5 rounded-lg ${
-                          isSelected ? 'bg-[#00f2c3] text-[#002118]' : 'bg-[#222b33] text-[#b9cac2]'
-                        }`}
-                      >
-                        <Icon name={opt.iconName} size="sm" />
-                      </div>
-                      <span
-                        className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full ${
-                          isSelected
-                            ? 'bg-[#00f2c3]/20 text-[#00f2c3] font-bold'
-                            : 'bg-black/30 text-[#b9cac2]/70'
-                        }`}
-                      >
-                        {opt.badge}
-                      </span>
-                    </div>
-                    <div>
-                      <div className="font-bold text-xs text-white leading-tight">
-                        {opt.title}
-                      </div>
-                      <div className="text-[10px] text-[#b9cac2]/80 mt-1 line-clamp-2">
-                        {opt.subtitle}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+          {/* Profil : choisi depuis le poste local ; depuis le réseau, toujours Visiteur */}
+          {choixProfil ? (
+            <div className="space-y-1.5">
+              <span className="block font-mono text-[10px] font-semibold text-[#b9cac2] uppercase tracking-wider">Profil du compte</span>
+              <RoleChoice roles={rolesDisponibles} value={role} onChange={setRole} />
+              <p className="text-[10px] font-mono text-[#87938e]">
+                Les données de session du compte précédent ne sont pas conservées.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="p-3 rounded-xl border border-[#3a4a44]/60 bg-[#1c242c] flex items-start gap-2.5 text-[11px] text-[#b9cac2]">
+              <Icon name="shield" size="sm" className="text-[#00f2c3] shrink-0 mt-0.5" />
+              <p>
+                Votre compte sera créé en <strong className="text-white">Visiteur (lecture seule)</strong>.
+                Un administrateur peut ensuite vous attribuer un rôle Technicien ou Administrateur.
+              </p>
+            </div>
+          )}
 
           {/* 2. Nom Complet & Identifiant */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -323,7 +266,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                     setNomComplet(e.target.value);
                     if (fieldErrors.nomComplet) setFieldErrors(prev => ({ ...prev, nomComplet: '' }));
                   }}
-                  placeholder="Ex: Edwin Jamel"
+                  placeholder="Ex: Prénom Nom"
                   className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 text-xs"
                 />
               </div>
@@ -355,7 +298,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                     setIdentifiant(e.target.value);
                     if (fieldErrors.identifiant) setFieldErrors(prev => ({ ...prev, identifiant: '' }));
                   }}
-                  placeholder="Ex: edwin"
+                  placeholder="Ex: jdupont"
                   className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
                 />
               </div>
@@ -389,7 +332,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                   setEmail(e.target.value);
                   if (fieldErrors.email) setFieldErrors(prev => ({ ...prev, email: '' }));
                 }}
-                placeholder="edwin@sentinelle.local"
+                placeholder="prenom.nom@exemple.fr"
                 className="w-full pl-9 pr-3 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
               />
             </div>
@@ -423,7 +366,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
                     setMotDePasse(e.target.value);
                     if (fieldErrors.motDePasse) setFieldErrors(prev => ({ ...prev, motDePasse: '' }));
                   }}
-                  placeholder="Min. 6 caractères"
+                  placeholder="Min. 12 caractères, lettres et chiffres"
                   className="w-full pl-9 pr-8 py-2 bg-transparent text-[#dae3ee] focus:outline-none placeholder-[#b9cac2]/40 font-mono text-xs"
                 />
                 <button

@@ -16,6 +16,14 @@ class CreateUserRequest(BaseModel):
     role: str = Field(default="Technicien", pattern="^(Administrateur|Technicien|Visiteur)$")
 
 
+class ResetPasswordRequest(BaseModel):
+    nouveau_mot_de_passe: str
+
+
+class UpdateUserRoleRequest(BaseModel):
+    role: str = Field(..., pattern="^(Administrateur|Technicien|Visiteur)$")
+
+
 class TelegramChannelConfig(BaseModel):
     bot_token: str = Field(..., description="Token du bot Telegram fourni par @BotFather")
     chat_id: str = Field(..., description="Identifiant du salon ou @username du canal")
@@ -35,12 +43,13 @@ class EmailChannelConfig(BaseModel):
 class NotificationSettingsPayload(BaseModel):
     """Configuration persistante des canaux de notification sur le serveur."""
 
-    demo_mode: bool = Field(default=False, description="Mode simulation désactivé par défaut (envoi réel)")
     telegram_enabled: bool = Field(default=False)
-    telegram_token: str = Field(default="")
+    telegram_token: str = Field(default="", description="Vide = conserver le token déjà enregistré")
+    clear_telegram_token: bool = Field(default=False, description="True = supprimer le token enregistré")
     telegram_chat_id: str = Field(default="")
     discord_enabled: bool = Field(default=False)
-    discord_webhook: str = Field(default="")
+    discord_webhook: str = Field(default="", description="Vide = conserver le webhook déjà enregistré")
+    clear_discord_webhook: bool = Field(default=False, description="True = supprimer le webhook enregistré")
     email_enabled: bool = Field(default=True)
     smtp_server: str = Field(default="smtp.gmail.com")
     smtp_port: int = Field(default=587, ge=1, le=65535)
