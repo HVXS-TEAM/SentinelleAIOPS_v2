@@ -7,6 +7,7 @@ est alimenté par la supervision réelle (hôte local, découverte réseau, équ
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import engine, SessionLocal, Base
+from backend.app.db import models  # noqa: F401 - Charge les modèles dans Base.metadata
 
 
 def init_db(db: Session) -> None:

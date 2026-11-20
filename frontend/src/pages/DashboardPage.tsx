@@ -22,15 +22,7 @@ interface TelemetryPoint {
   pred: number | null;
 }
 
-const DEFAULT_TELEMETRY_DATA: TelemetryPoint[] = [
-  { day: 'T-6',          cpu: 24, ram: 42, pred: null },
-  { day: 'T-4',          cpu: 28, ram: 44, pred: null },
-  { day: 'T-2',          cpu: 26, ram: 43, pred: null },
-  { day: 'T-1',          cpu: 31, ram: 45, pred: null },
-  { day: 'Maintenant',   cpu: 33, ram: 46, pred: 33   },
-  { day: '+2h (Préd.)',  cpu: null, ram: null, pred: 35 },
-  { day: '+6h (Préd.)',  cpu: null, ram: null, pred: 38 },
-];
+const DEFAULT_TELEMETRY_DATA: TelemetryPoint[] = [];
 
 /* ── Équipements critiques du tableau ────────────────────────────────────── */
 interface EquipmentRow {
@@ -68,7 +60,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
   const [criticalAlertsCount, setCriticalAlertsCount] = useState<number>(0);
   const [avgHealth, setAvgHealth] = useState<number>(100);
   const [predictedIncidents, setPredictedIncidents] = useState<number>(0);
-  const [cisCompliance, setCisCompliance] = useState<number>(88);
+  const [cisCompliance, setCisCompliance] = useState<number | null>(null);
 
   const [telemetryData, setTelemetryData] = useState<TelemetryPoint[]>(DEFAULT_TELEMETRY_DATA);
   const [donutData, setDonutData] = useState<DonutSlice[]>([
@@ -108,8 +100,10 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
         if (typeof data.kpis.ttf_imminents === 'number') {
           setPredictedIncidents(data.kpis.ttf_imminents);
         }
-        if (typeof data.kpis.cis_conformite_moyenne === 'number') {
+        if (typeof data.kpis.cis_conformite_moyenne === 'number' && data.kpis.cis_conformite_moyenne > 0) {
           setCisCompliance(Math.round(data.kpis.cis_conformite_moyenne));
+        } else {
+          setCisCompliance(null);
         }
       }
 
@@ -408,10 +402,10 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             CONFORMITÉ RÉSEAU
           </span>
           <div className="text-3xl font-bold font-mono text-[#e0e3e6] mt-2">
-            {cisCompliance}%
+            {cisCompliance !== null ? `${cisCompliance}%` : '—'}
           </div>
           <div className="text-xs font-mono text-[#78d8ba] mt-2 flex items-center gap-1">
-            <Icon name="check_circle" size="xs" /> Benchmark CIS
+            <Icon name="check_circle" size="xs" /> {cisCompliance !== null ? 'Benchmark CIS' : 'Non audité'}
           </div>
         </div>
       </div>
@@ -440,80 +434,90 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
             </div>
 
             <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={telemetryData} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#272a2d" vertical={false} />
-                  <XAxis
-                    dataKey="day"
-                    stroke="#87938e"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={{ stroke: '#272a2d' }}
-                    tick={({ x, y, payload }) => (
-                      <text
-                        x={x}
-                        y={Number(y) + 12}
-                        textAnchor="middle"
-                        fill={String(payload.value).includes('Préd') ? '#81d0f8' : '#87938e'}
-                        fontSize={10}
-                        fontFamily="JetBrains Mono"
-                      >
-                        {payload.value}
-                      </text>
-                    )}
-                  />
-                  <YAxis
-                    stroke="#87938e"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={{ stroke: '#272a2d' }}
-                    tickFormatter={v => `${v}%`}
-                    domain={[0, 100]}
-                    ticks={[0, 25, 50, 75, 100]}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#161c22',
-                      borderColor: '#3e4945',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      color: '#e0e3e6',
-                      fontFamily: 'JetBrains Mono',
-                    }}
-                  />
-                  {/* Courbe CPU Réel */}
-                  <Line
-                    type="monotone"
-                    dataKey="cpu"
-                    name="CPU Réel (%)"
-                    stroke="#78d8ba"
-                    strokeWidth={2.5}
-                    dot={{ r: 3, fill: '#78d8ba' }}
-                    connectNulls={false}
-                  />
-                  {/* Courbe RAM Réelle */}
-                  <Line
-                    type="monotone"
-                    dataKey="ram"
-                    name="RAM Réelle (%)"
-                    stroke="#81d0f8"
-                    strokeWidth={2}
-                    dot={{ r: 3, fill: '#81d0f8' }}
-                    connectNulls={false}
-                  />
-                  {/* Courbe Prédiction IA pointillée */}
-                  <Line
-                    type="monotone"
-                    dataKey="pred"
-                    name="Projection IA (%)"
-                    stroke="#78d8ba"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                    dot={{ r: 3, fill: '#78d8ba' }}
-                    connectNulls
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {telemetryData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={telemetryData} margin={{ top: 10, right: 15, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#272a2d" vertical={false} />
+                    <XAxis
+                      dataKey="day"
+                      stroke="#87938e"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={{ stroke: '#272a2d' }}
+                      tick={({ x, y, payload }) => (
+                        <text
+                          x={x}
+                          y={Number(y) + 12}
+                          textAnchor="middle"
+                          fill={String(payload.value).includes('Préd') ? '#81d0f8' : '#87938e'}
+                          fontSize={10}
+                          fontFamily="JetBrains Mono"
+                        >
+                          {payload.value}
+                        </text>
+                      )}
+                    />
+                    <YAxis
+                      stroke="#87938e"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={{ stroke: '#272a2d' }}
+                      tickFormatter={v => `${v}%`}
+                      domain={[0, 100]}
+                      ticks={[0, 25, 50, 75, 100]}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#161c22',
+                        borderColor: '#3e4945',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#e0e3e6',
+                        fontFamily: 'JetBrains Mono',
+                      }}
+                    />
+                    {/* Courbe CPU Réel */}
+                    <Line
+                      type="monotone"
+                      dataKey="cpu"
+                      name="CPU Réel (%)"
+                      stroke="#78d8ba"
+                      strokeWidth={2.5}
+                      dot={{ r: 3, fill: '#78d8ba' }}
+                      connectNulls={false}
+                    />
+                    {/* Courbe RAM Réelle */}
+                    <Line
+                      type="monotone"
+                      dataKey="ram"
+                      name="RAM Réelle (%)"
+                      stroke="#81d0f8"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#81d0f8' }}
+                      connectNulls={false}
+                    />
+                    {/* Courbe Prédiction IA pointillée */}
+                    <Line
+                      type="monotone"
+                      dataKey="pred"
+                      name="Projection IA (%)"
+                      stroke="#78d8ba"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 3, fill: '#78d8ba' }}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-[#272a2d] rounded-lg bg-[#14181a]/50">
+                  <Icon name="monitoring" size="lg" className="text-[#87938e] mb-2 opacity-40" />
+                  <p className="text-sm text-[#e0e3e6] font-medium font-mono">Aucune métrique télémétrique disponible</p>
+                  <p className="text-xs text-[#87938e] mt-1 max-w-sm">
+                    Les métriques réelles de la machine hôte et du parc apparaîtront dès les premiers cycles de collecte.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -544,46 +548,54 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigateTab }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#272a2d]/50 text-xs font-mono">
-                  {criticalEquipmentsList.map(eq => (
-                    <tr
-                      key={eq.id}
-                      onClick={() => setSelectedEquipment(eq)}
-                      className="hover:bg-[#272a2d]/50 cursor-pointer transition-colors group"
-                    >
-                      <td className="py-3.5 pl-2">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full inline-block"
-                          style={{ backgroundColor: eq.statusColor }}
-                          title={eq.statusText}
-                        />
-                      </td>
-                      <td className="py-3.5 font-bold text-[#e0e3e6] group-hover:text-[#78d8ba] transition-colors">
-                        {eq.nom}
-                      </td>
-                      <td className="py-3.5 text-[#bdc9c3]">{eq.type}</td>
-                      <td className="py-3.5 text-[#87938e]">{eq.ip}</td>
-                      <td className="py-3.5 text-[#bdc9c3]">
-                        <span className={eq.cpu > 80 ? 'text-[#ffb4ab] font-bold' : 'text-[#78d8ba]'}>{eq.cpu}%</span>
-                        {' / '}
-                        <span className="text-[#81d0f8]">{eq.ram}%</span>
-                        {' / '}
-                        <span className={eq.disk > 85 ? 'text-[#ffb4ab] font-bold' : 'text-[#bdc9c3]'}>{eq.disk}%</span>
-                      </td>
-                      <td className="py-3.5 text-right pr-2">
-                        {eq.tendance === 'up' ? (
-                          <span className="text-[#ffb4ab] inline-flex items-center gap-1 font-bold">
-                            &uarr; Hausse
-                          </span>
-                        ) : eq.tendance === 'down' ? (
-                          <span className="text-[#78d8ba] inline-flex items-center gap-1">
-                            &darr; Baisse
-                          </span>
-                        ) : (
-                          <span className="text-[#87938e]">~ Stable</span>
-                        )}
+                  {criticalEquipmentsList.length > 0 ? (
+                    criticalEquipmentsList.map(eq => (
+                      <tr
+                        key={eq.id}
+                        onClick={() => setSelectedEquipment(eq)}
+                        className="hover:bg-[#272a2d]/50 cursor-pointer transition-colors group"
+                      >
+                        <td className="py-3.5 pl-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full inline-block"
+                            style={{ backgroundColor: eq.statusColor }}
+                            title={eq.statusText}
+                          />
+                        </td>
+                        <td className="py-3.5 font-bold text-[#e0e3e6] group-hover:text-[#78d8ba] transition-colors">
+                          {eq.nom}
+                        </td>
+                        <td className="py-3.5 text-[#bdc9c3]">{eq.type}</td>
+                        <td className="py-3.5 text-[#87938e]">{eq.ip}</td>
+                        <td className="py-3.5 text-[#bdc9c3]">
+                          <span className={eq.cpu > 80 ? 'text-[#ffb4ab] font-bold' : 'text-[#78d8ba]'}>{eq.cpu}%</span>
+                          {' / '}
+                          <span className="text-[#81d0f8]">{eq.ram}%</span>
+                          {' / '}
+                          <span className={eq.disk > 85 ? 'text-[#ffb4ab] font-bold' : 'text-[#bdc9c3]'}>{eq.disk}%</span>
+                        </td>
+                        <td className="py-3.5 text-right pr-2">
+                          {eq.tendance === 'up' ? (
+                            <span className="text-[#ffb4ab] inline-flex items-center gap-1 font-bold">
+                              &uarr; Hausse
+                            </span>
+                          ) : eq.tendance === 'down' ? (
+                            <span className="text-[#78d8ba] inline-flex items-center gap-1">
+                              &darr; Baisse
+                            </span>
+                          ) : (
+                            <span className="text-[#87938e]">~ Stable</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-[#87938e] text-xs">
+                        Aucun équipement supervisé pour le moment.
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
