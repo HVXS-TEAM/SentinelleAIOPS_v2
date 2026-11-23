@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 from backend.app.db.session import SessionLocal
@@ -70,6 +71,18 @@ def _job_security_scan() -> None:
         logger.warning("Erreur lors de l'analyse périodique de sécurité : %s", exc)
 
 
+def _job_auto_discover_network() -> None:
+    """
+    Rôle : Tâche planifiée de découverte réseau autonome et auto-enrôlement des équipements réels du LAN.
+    """
+    try:
+        from backend.app.modules.parc.service import ParcService
+        with SessionLocal() as db:
+            ParcService.scan_and_auto_enroll(db)
+    except Exception as exc:
+        logger.warning("Erreur lors de l'auto-découverte périodique du réseau : %s", exc)
+
+
 def start_background_scheduler() -> None:
     """
     Rôle : Démarre le planificateur APScheduler en arrière-plan (sauf si désactivé pendant les tests).
@@ -121,8 +134,27 @@ def start_background_scheduler() -> None:
                 replace_existing=True,
                 max_instances=1,
             )
+            scheduler.add_job(
+                _job_auto_discover_network,
+                "interval",
+                minutes=15,
+                id="network_auto_discovery",
+                replace_existing=True,
+                max_instances=1,
+            )
             scheduler.start()
             _scheduler_instance = scheduler
+
+            # Lancement d'une découverte initiale en arrière-plan 4 secondes après le boot
+            def _initial_delayed_discovery():
+                time.sleep(4)
+                _job_auto_discover_network()
+
+            threading.Thread(
+                target=_initial_delayed_discovery,
+                daemon=True,
+                name="initial_network_discovery",
+            ).start()
         except Exception as exc:
             logger.warning("APScheduler non démarré : %s", exc)
 

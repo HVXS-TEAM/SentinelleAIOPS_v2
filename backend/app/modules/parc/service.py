@@ -877,7 +877,7 @@ class ParcService:
                 skipped.append(ip)
                 continue
 
-            nom = dev.get("nom") or f"PHY-{ip.replace('.', '-')}"
+            nom = dev.get("nom") or dev.get("hostname") or f"PHY-{ip.replace('.', '-')}"
             # Éviter tout conflit sur le nom d'équipement
             if db.query(Equipement).filter(Equipement.nom == nom).first():
                 nom = f"{nom}-{ip.split('.')[-1]}"
@@ -921,3 +921,63 @@ class ParcService:
             "skipped_count": len(skipped),
             "skipped_ips": skipped,
         }
+
+    @classmethod
+    def scan_and_auto_enroll(cls, db: Session) -> Dict[str, Any]:
+        """
+        Rôle : Découvre de manière autonome le réseau local et auto-enrôle tous les équipements non enregistrés.
+        Entrées : Session SQLAlchemy (db).
+        Sorties : Bilan d'enrôlement {scanned_count, new_enrolled_count, enrolled_devices}.
+        """
+        try:
+            scan_res = cls.scan_real_network(db)
+            devices = scan_res.get("devices", [])
+            inconnus = [d for d in devices if not d.get("already_in_parc")]
+
+            if not inconnus:
+                return {
+                    "scanned_count": len(devices),
+                    "new_enrolled_count": 0,
+                    "enrolled_devices": [],
+                }
+
+            # Adapter les données pour import_real_devices
+            for d in inconnus:
+                if "nom" not in d and "hostname" in d:
+                    d["nom"] = d["hostname"]
+                if "groupe" not in d:
+                    d["groupe"] = "LAN Découvert"
+
+            import_res = cls.import_real_devices(db, inconnus)
+            new_devices = import_res.get("imported_devices", [])
+
+            # Génération d'une alerte informative pour notifier l'administrateur
+            now = datetime.now(timezone.utc)
+            for dev in new_devices:
+                al = Alerte(
+                    equipement_id=dev.get("id"),
+                    module_origine="Parc",
+                    severite="INFO",
+                    titre=f"Nouvel équipement découvert : {dev.get('nom')}",
+                    message=f"Équipement physique détecté sur le LAN à l'adresse {dev.get('ip')} et intégré automatiquement à la supervision.",
+                    statut="Active",
+                    date_creation=now,
+                )
+                db.add(al)
+
+            if new_devices:
+                db.commit()
+
+            logger.info(
+                "Auto-enrôlement réseau : %d nouvel/nouveaux équipement(s) physique(s) découvert(s) et supervisé(s).",
+                len(new_devices),
+            )
+
+            return {
+                "scanned_count": len(devices),
+                "new_enrolled_count": len(new_devices),
+                "enrolled_devices": new_devices,
+            }
+        except Exception as exc:
+            logger.warning("Erreur lors de l'auto-enrôlement réseau autonome : %s", exc)
+            return {"scanned_count": 0, "new_enrolled_count": 0, "enrolled_devices": [], "erreur": str(exc)}

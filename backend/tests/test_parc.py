@@ -266,4 +266,41 @@ def test_terminal_endpoint_remonte_l_echec_ssh(monkeypatch):
     assert resp.json()["mode"] == "SSH_ERROR" and resp.json()["exit_code"] == 255
 
 
+def test_scan_and_auto_enroll_enroles_new_devices(monkeypatch):
+    """Vérifie que l'auto-découverte enrôle automatiquement les équipements du réseau et crée une alerte."""
+    db = SessionLocal()
+    test_device = {
+        "ip": "192.0.2.77",
+        "mac": "AA:BB:CC:DD:EE:77",
+        "hostname": "ROUTEUR-AUTO-TEST",
+        "type": "Routeur / Passerelle",
+        "os": "Test OS",
+        "open_ports": [80],
+        "already_in_parc": False,
+    }
+    monkeypatch.setattr(ParcService, "scan_real_network", lambda _db: {"devices": [test_device]})
+
+    res = ParcService.scan_and_auto_enroll(db)
+    assert res["new_enrolled_count"] == 1
+
+    # Vérifier que l'équipement a été inséré
+    eq = db.query(Equipement).filter(Equipement.ip == "192.0.2.77").first()
+    assert eq is not None
+    assert eq.nom == "ROUTEUR-AUTO-TEST"
+    assert eq.groupe == "LAN Découvert"
+
+    # Vérifier qu'une alerte informative d'auto-découverte a été créée
+    alerte = db.query(Alerte).filter(Alerte.module_origine == "Parc", Alerte.equipement_id == eq.id).first()
+    assert alerte is not None
+    assert alerte.severite == "INFO"
+    assert "ROUTEUR-AUTO-TEST" in alerte.titre
+
+    # Nettoyage
+    db.delete(alerte)
+    db.delete(eq)
+    db.commit()
+    db.close()
+
+
+
 
